@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Captura de Firmas</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1> Captura de Firma Digital</h1>
+            <p class="subtitle">Por favor complete sus datos y proporcione su firma</p>
+        </header>
+
+        <form id="signatureForm">
+            <div class="form-section">
+                <h2>Datos Personales</h2>
+                
+                <div class="form-group">
+                    <label for="fullName">Nombre Completo *</label>
+                    <input type="text" id="fullName" name="fullName" required 
+                           placeholder="Ej: Juan Pérez García">
+                </div>
+
+                <div class="form-group">
+                    <label for="document">CURP / RFC *</label>
+                    <input type="text" id="document" name="document" required 
+                           placeholder="Ej: ABCD123456HMCRSS09 o ABC123456XYZ">
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h2>Firma Digital</h2>
+                <p class="instruction">Dibuje su firma en el recuadro usando su mouse, dedo o stylus</p>
+                
+                <div class="signature-container">
+                    <canvas id="signatureCanvas"></canvas>
+                    <div class="canvas-placeholder" id="canvasPlaceholder">
+                        ✍️ Dibuje su firma aquí
+                    </div>
+                </div>
+
+                <div class="signature-controls">
+                    <button type="button" id="clearBtn" class="btn btn-secondary">
+                        🗑️ Limpiar Firma
+                    </button>
+                    <button type="button" id="undoBtn" class="btn btn-secondary">
+                        ↶ Deshacer
+                    </button>
+                </div>
+
+                <div class="color-picker">
+                    <label>Color de Firma:</label>
+                    <button type="button" class="color-btn" data-color="#000000" style="background: #000000;"></button>
+                    <button type="button" class="color-btn" data-color="#737373" style="background: #737373;"></button>
+                    <button type="button" class="color-btn" data-color="#cc0000" style="background: #cc0000;"></button>
+                    <button type="button" class="color-btn" data-color="#009900" style="background: #009900;"></button>
+                </div>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" id="submitBtn" class="btn btn-primary">
+                    ✓ Guardar Firma
+                </button>
+            </div>
+        </form>
+
+        <div id="successMessage" class="success-message" style="display: none;">
+            <h3>✓ ¡Firma guardada exitosamente!</h3>
+            <p>Sus datos y firma han sido registrados correctamente.</p>
+        </div>
+    </div>
+
+    <footer>
+        <p>Sistema de Captura de Firmas Digitales - 2025</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

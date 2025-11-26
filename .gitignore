@@ -1,0 +1,15 @@
+# Sistema de Firmas - Local Storage
+# Este proyecto no tiene archivos a ignorar específicos
+# Todo funciona en el navegador con localStorage
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Carpetas temporales
+tmp/
+temp/

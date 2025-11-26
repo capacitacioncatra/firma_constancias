@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Administración - Firmar PDFs</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/tesseract.js@5.0.0/dist/tesseract.min.js"></script>
+    <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script>
+        // Configurar worker de PDF.js
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+        }
+    </script>
+</head>
+<body>
+    <div class="admin-container">
+        <div class="admin-header">
+            <h1>📋 Panel de Administración - Firmar Documentos</h1>
+            <p>Sistema completamente local con OCR automático</p>
+            <div style="margin-top: 20px;">
+                <a href="index.html" class="btn btn-secondary" style="display: inline-block; text-decoration: none; padding: 12px 24px;">
+                    👤 Captura de Firmas
+                </a>
+                <button id="configRepBtn" class="btn btn-primary">
+                    ⚙️ Configurar Firma Representante
+                </button>
+            </div>
+        </div>
+
+        <!-- Configuración firma representante -->
+        <div id="representantConfig" class="config-section" style="display: none;">
+            <div class="card">
+                <h2>⚙️ Firma del Representante Legal</h2>
+                <div id="currentRepSignature" style="margin: 20px 0;"></div>
+                
+                <input type="file" id="repSignatureFile" accept="image/png,image/jpeg,image/jpg" style="display: none;">
+                
+                <div class="upload-area" id="repUploadArea" style="padding: 40px 20px; cursor: pointer;">
+                    <div class="upload-content">
+                        <div class="upload-icon">🖼️</div>
+                        <h4>Sube la imagen de la firma del representante</h4>
+                    </div>
+                </div>
+
+                <div id="repSignaturePreview" style="display: none; margin: 20px 0; text-align: center;">
+                    <h4>Vista Previa:</h4>
+                    <img id="repPreviewImg" style="max-width: 300px; border: 2px solid #ddd; border-radius: 8px; padding: 10px;">
+                </div>
+
+                <button id="saveRepBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;" disabled>
+                    💾 Guardar Firma del Representante
+                </button>
+            </div>
+        </div>
+
+        <!-- Sección de firmado -->
+        <div class="card">
+            <h2>📄 Firmar PDF</h2>
+            
+            <div class="form-group">
+                <label>1. Selecciona los documentos (PDF o Imágenes):</label>
+                <input type="file" id="pdfFile" accept=".pdf,.jpg,.jpeg,.png,image/*" multiple class="btn btn-secondary" style="width: 100%;">
+                <p style="margin-top: 8px; color: #666; font-size: 0.9rem;">
+                    💡 Puedes seleccionar múltiples archivos (Ctrl+Clic o Shift+Clic)
+                </p>
+            </div>
+
+            <!-- Cola de archivos -->
+            <div id="filesQueueSection" style="display: none; margin-top: 20px;">
+                <h3>📄 Archivos en cola (<span id="queueCount">0</span>)</h3>
+                <div id="filesQueue" style="background: #f3f4f6; border-radius: 8px; padding: 15px; max-height: 300px; overflow-y: auto;">
+                    <!-- Los archivos se mostrarán aquí -->
+                </div>
+                <button id="processAllBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;">
+                    ⚡ Procesar Todos los Archivos
+                </button>
+            </div>
+
+            <div id="scanningSection" style="display: none; margin-top: 20px;">
+                <div style="background: #dbeafe; border: 2px solid #3b82f6; border-radius: 8px; padding: 20px; text-align: center;">
+                    <h3>🔍 Escaneando PDF...</h3>
+                    <div style="margin: 20px 0;">
+                        <div style="width: 100%; height: 20px; background: #e5e7eb; border-radius: 10px; overflow: hidden;">
+                            <div id="scanProgress" style="width: 0%; height: 100%; background: linear-gradient(90deg, #3b82f6, #8b5cf6); transition: width 0.3s;"></div>
+                        </div>
+                        <p id="scanStatus" style="margin-top: 10px; color: #1e40af;">Convirtiendo PDF a imagen...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group" id="personDataSection" style="display: none;">
+                <h3>Datos detectados:</h3>
+                <label for="personName">Nombre Completo:</label>
+                <input type="text" id="personName" placeholder="Detectado automáticamente o edita aquí" class="form-control">
+                
+                <label for="personDoc" style="margin-top: 10px;">CURP/RFC:</label>
+                <input type="text" id="personDoc" placeholder="Detectado automáticamente o edita aquí" class="form-control">
+                
+                <button id="searchSignatureBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;">
+                    🔍 Buscar Firma Manualmente
+                </button>
+                <p style="text-align: center; color: #666; font-size: 0.85rem; margin-top: 5px;">
+                    (El sistema ya buscó automáticamente, usa este botón si necesitas buscar de nuevo)
+                </p>
+            </div>
+
+            <div id="signatureFound" style="display: none; margin-top: 20px;">
+                <h3 style="color: #10b981;">✓ Firma encontrada</h3>
+                <div style="border: 2px solid #10b981; border-radius: 8px; padding: 15px; background: #f0fdf4;">
+                    <img id="foundSignature" style="max-width: 250px; display: block; margin: 10px auto;">
+                    <p style="text-align: center; margin: 10px 0;"><strong id="foundName"></strong></p>
+                </div>
+                
+                <button id="signPdfBtn" class="btn btn-primary" style="width: 100%; margin-top: 20px; font-size: 1.1rem;">
+                    ✨ Firmar y Descargar PDF
+                </button>
+            </div>
+
+            <div id="noSignature" style="display: none; margin-top: 20px;">
+                <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 8px; padding: 20px;">
+                    <h3 style="color: #dc2626;">❌ Firma no encontrada</h3>
+                    <p>No se encontró ninguna firma registrada para esta persona.</p>
+                    <p style="margin-top: 10px;"><strong>Sugerencia:</strong> Verifica que la persona haya capturado su firma en la página de captura.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estadísticas -->
+        <div class="card">
+            <h3>📊 Estadísticas</h3>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalSignatures">0</div>
+                    <div class="stat-label">Firmas Registradas</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="repSignatureStatus">❌</div>
+                    <div class="stat-label">Firma Representante</div>
+                </div>
+            </div>
+            <button id="viewSignaturesBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;">
+                👁️ Ver Firmas Registradas
+            </button>
+        </div>
+
+        <!-- Lista de firmas registradas -->
+        <div class="card" id="signaturesListSection" style="display: none;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h3>📝 Firmas Registradas</h3>
+                <button id="closeSignaturesBtn" class="btn btn-secondary">✕ Cerrar</button>
+            </div>
+            
+            <div id="signaturesList" style="display: grid; gap: 15px;">
+                <!-- Las firmas se cargarán aquí dinámicamente -->
+            </div>
+            
+            <div id="noSignaturesMessage" style="display: none; text-align: center; padding: 40px; background: #f3f4f6; border-radius: 8px;">
+                <p style="font-size: 1.2rem; color: #666;">📭 No hay firmas registradas</p>
+                <p style="color: #999; margin-top: 10px;">Las firmas aparecerán aquí cuando se capturen desde la página de registro</p>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <p>Sistema de Firmas Digitales - 100% Local | <a href="index.html" style="color: #3b82f6;">👤 Captura de Firmas</a></p>
+    </footer>
+
+    <script src="admin-simple.js"></script>
+</body>
+</html>
