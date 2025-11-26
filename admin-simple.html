@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Panel de Administración - Firmar PDFs</title>
     <link rel="stylesheet" href="styles.css">
+    <script src="config.js"></script>
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="https://unpkg.com/tesseract.js@5.0.0/dist/tesseract.min.js"></script>
     <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
@@ -33,7 +34,7 @@
         <!-- Configuración firma representante -->
         <div id="representantConfig" class="config-section" style="display: none;">
             <div class="card">
-                <h2>⚙️ Firma del Representante Legal</h2>
+                <h2> Firma del Representante Legal</h2>
                 <div id="currentRepSignature" style="margin: 20px 0;"></div>
                 
                 <input type="file" id="repSignatureFile" accept="image/png,image/jpeg,image/jpg" style="display: none;">
@@ -56,6 +57,25 @@
             </div>
         </div>
 
+        <!-- Sección de búsqueda de firmas -->
+        <div class="card">
+            <h2>🔍 Buscar Firma Registrada</h2>
+            <p style="margin-bottom: 15px; color: #666;">Busca firmas por nombre o CURP/RFC</p>
+            
+            <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <input type="text" id="searchInput" placeholder="Buscar por nombre o CURP..." 
+                       style="flex: 1; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 1rem;">
+                <button id="searchBtn" class="btn btn-primary" style="white-space: nowrap;">
+                    🔍 Buscar
+                </button>
+            </div>
+
+            <div id="searchResults" style="display: none;">
+                <h3 style="margin-bottom: 15px;">Resultados de búsqueda:</h3>
+                <div id="searchResultsList" style="max-height: 400px; overflow-y: auto;"></div>
+            </div>
+        </div>
+
         <!-- Sección de firmado -->
         <div class="card">
             <h2>📄 Firmar PDF</h2>
@@ -63,9 +83,6 @@
             <div class="form-group">
                 <label>1. Selecciona los documentos (PDF o Imágenes):</label>
                 <input type="file" id="pdfFile" accept=".pdf,.jpg,.jpeg,.png,image/*" multiple class="btn btn-secondary" style="width: 100%;">
-                <p style="margin-top: 8px; color: #666; font-size: 0.9rem;">
-                    💡 Puedes seleccionar múltiples archivos (Ctrl+Clic o Shift+Clic)
-                </p>
             </div>
 
             <!-- Cola de archivos -->

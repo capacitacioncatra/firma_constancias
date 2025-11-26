@@ -87,6 +87,17 @@ class SimpleAdminPDF {
             document.getElementById('signaturesListSection').style.display = 'none';
         });
 
+        // Sistema de búsqueda de firmas
+        document.getElementById('searchBtn').addEventListener('click', () => {
+            this.searchSignatures();
+        });
+
+        document.getElementById('searchInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.searchSignatures();
+            }
+        });
+
         // Actualizar estadísticas
         this.updateStats();
     }
@@ -1117,7 +1128,7 @@ class SimpleAdminPDF {
             // Ajusta estas coordenadas según tu plantilla de documento
             const COORDENADAS = {
                 usuario: {
-                    x: 170,      // Posición horizontal desde la izquierda
+                    x: 171| ,      // Posición horizontal desde la izquierda
                     y: 1150,      // Posición vertical desde abajo
                     ancho: 400,  // Ancho de la firma
                     alto: 200     // Alto de la firma
@@ -1212,6 +1223,128 @@ class SimpleAdminPDF {
         const hasRep = localStorage.getItem('representant_signature');
         document.getElementById('repSignatureStatus').textContent = hasRep ? '✅' : '❌';
     }
+
+    // Funciones para Google Sheets
+    async searchSignatures() {
+        const searchTerm = document.getElementById('searchInput').value.trim();
+        
+        if (!searchTerm || searchTerm.length < 3) {
+            alert('⚠️ Ingresa al menos 3 caracteres para buscar');
+            return;
+        }
+
+        const searchBtn = document.getElementById('searchBtn');
+        searchBtn.disabled = true;
+        searchBtn.textContent = '⏳ Buscando...';
+
+        try {
+            let results = [];
+            
+            if (CONFIG.USE_GOOGLE_SHEETS) {
+                // Buscar en Google Sheets
+                const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=search&query=${encodeURIComponent(searchTerm)}`);
+                results = await response.json();
+            } else {
+                // Buscar en localStorage
+                const signatures = this.getAllSignatures();
+                const searchLower = searchTerm.toLowerCase();
+                results = signatures.filter(sig => 
+                    sig.fullName.toLowerCase().includes(searchLower) ||
+                    sig.document.toLowerCase().includes(searchLower)
+                );
+            }
+
+            this.displaySearchResults(results);
+
+        } catch (error) {
+            console.error('Error en búsqueda:', error);
+            alert('❌ Error al buscar firmas');
+        } finally {
+            searchBtn.disabled = false;
+            searchBtn.textContent = '🔍 Buscar';
+        }
+    }
+
+    displaySearchResults(results) {
+        const resultsSection = document.getElementById('searchResults');
+        const resultsList = document.getElementById('searchResultsList');
+
+        if (results.length === 0) {
+            resultsList.innerHTML = `
+                <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 8px; padding: 20px; text-align: center;">
+                    <h3 style="color: #dc2626;">❌ Sin resultados</h3>
+                    <p>No se encontraron firmas con ese criterio de búsqueda.</p>
+                </div>
+            `;
+        } else {
+            resultsList.innerHTML = results.map(sig => `
+                <div style="background: white; border: 2px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 15px;">
+                    <img src="${sig.signature}" style="width: 120px; height: 60px; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;">
+                    <div style="flex: 1;">
+                        <p style="margin: 0; font-weight: bold;">${sig.fullName}</p>
+                        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9rem;">${sig.document}</p>
+                        <p style="margin: 5px 0 0 0; color: #999; font-size: 0.85rem;">${new Date(sig.timestamp).toLocaleString('es-MX')}</p>
+                    </div>
+                    <button onclick="adminPDF.selectSignatureForSigning('${sig.id}')" class="btn btn-primary" style="white-space: nowrap;">
+                        ✓ Usar esta firma
+                    </button>
+                    <button onclick="adminPDF.viewSignatureDetails('${sig.id}')" class="btn btn-secondary" style="white-space: nowrap;">
+                        👁️ Ver detalles
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        resultsSection.style.display = 'block';
+    }
+
+    selectSignatureForSigning(signatureId) {
+        // Buscar la firma seleccionada
+        let signature;
+        
+        if (CONFIG.USE_GOOGLE_SHEETS) {
+            // En el caso de Sheets, la firma ya está en los resultados mostrados
+            const resultsList = document.getElementById('searchResultsList');
+            const signatures = this.getAllSignatures(); // Temporal mientras se carga
+            signature = signatures.find(sig => sig.id === signatureId);
+        } else {
+            const signatures = this.getAllSignatures();
+            signature = signatures.find(sig => sig.id === signatureId);
+        }
+
+        if (signature) {
+            // Rellenar los campos de persona
+            document.getElementById('personName').value = signature.fullName;
+            document.getElementById('personDoc').value = signature.document;
+            
+            // Mostrar la firma encontrada
+            this.currentSignature = signature.signature;
+            document.getElementById('foundSignature').src = signature.signature;
+            document.getElementById('foundName').textContent = `${signature.fullName} - ${signature.document}`;
+            document.getElementById('signatureFound').style.display = 'block';
+            document.getElementById('noSignature').style.display = 'none';
+            
+            // Scroll hacia la sección de firmado
+            document.querySelector('.card h2').scrollIntoView({ behavior: 'smooth', block: 'start' });
+            
+            alert('✅ Firma seleccionada. Ahora puedes cargar un PDF para firmar.');
+        }
+    }
+
+    viewSignatureDetails(signatureId) {
+        const signatures = this.getAllSignatures();
+        const signature = signatures.find(sig => sig.id === signatureId);
+        
+        if (signature) {
+            const details = `
+                Nombre: ${signature.fullName}
+                CURP/RFC: ${signature.document}
+                Fecha de registro: ${new Date(signature.timestamp).toLocaleString('es-MX')}
+                ID: ${signature.id}
+            `;
+            alert(details);
+        }
+    }
 }
 
 // Inicializar cuando cargue la página y las librerías
@@ -1239,7 +1372,7 @@ document.addEventListener('DOMContentLoaded', () => {
             statusDiv.style.background = '#10b981';
             statusDiv.textContent = '✅ Sistema listo';
             setTimeout(() => statusDiv.remove(), 2000);
-            new SimpleAdminPDF();
+            window.adminPDF = new SimpleAdminPDF();
         }
     }, 100);
     

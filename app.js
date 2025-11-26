@@ -204,7 +204,7 @@ class SignatureForm {
         // Deshabilitar botón de envío
         const submitBtn = document.getElementById('submitBtn');
         submitBtn.disabled = true;
-        submitBtn.textContent = '⏳ Procesando...';
+        submitBtn.textContent = '⏳ Guardando...';
 
         // Get form data
         const formData = {
@@ -216,8 +216,8 @@ class SignatureForm {
         };
 
         try {
-            // Guardar firma en localStorage
-            this.saveSignature(formData);
+            // Guardar firma
+            await this.saveSignature(formData);
 
             // Mostrar éxito
             this.showSuccess({
@@ -234,21 +234,33 @@ class SignatureForm {
         }
     }
 
-    saveSignature(data) {
+    async saveSignature(data) {
         try {
-            // Get existing signatures from localStorage
-            let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
-            
-            // Add new signature
-            signatures.push(data);
-            
-            // Save back to localStorage
-            localStorage.setItem('signatures', JSON.stringify(signatures));
-            
-            console.log('Firma guardada exitosamente:', data.id);
+            if (CONFIG.USE_GOOGLE_SHEETS) {
+                // Guardar en Google Sheets
+                const response = await fetch(CONFIG.SHEETS_API_URL, {
+                    method: 'POST',
+                    mode: 'no-cors', // Necesario para Google Apps Script
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        action: 'save',
+                        data: data
+                    })
+                });
+                
+                console.log('Firma guardada exitosamente en Google Sheets:', data.id);
+            } else {
+                // Fallback a localStorage para desarrollo
+                let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+                signatures.push(data);
+                localStorage.setItem('signatures', JSON.stringify(signatures));
+                console.log('Firma guardada exitosamente en localStorage:', data.id);
+            }
         } catch (error) {
             console.error('Error al guardar la firma:', error);
-            alert('Hubo un error al guardar la firma. Por favor, intente nuevamente.');
+            throw error;
         }
     }
 
