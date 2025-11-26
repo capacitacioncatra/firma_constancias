@@ -321,7 +321,7 @@ class SimpleAdminPDF {
         const name = this.extractNameFromText(text);
         const doc = this.extractDocumentFromText(text);
         
-        const signatures = this.getAllSignatures();
+        const signatures = await this.getAllSignatures();
         const found = signatures.find(sig => {
             const sigDoc = (sig.document || '').toLowerCase().trim();
             const searchDoc = doc.toLowerCase().trim();
@@ -412,8 +412,8 @@ class SimpleAdminPDF {
         return await pdfDoc.save();
     }
 
-    showSignaturesList() {
-        const signatures = this.getAllSignatures();
+    async showSignaturesList() {
+        const signatures = await this.getAllSignatures();
         const listContainer = document.getElementById('signaturesList');
         const noSignaturesMsg = document.getElementById('noSignaturesMessage');
         const section = document.getElementById('signaturesListSection');
@@ -720,8 +720,8 @@ class SimpleAdminPDF {
             return;
         }
         
-        // Buscar en localStorage
-        const signatures = this.getAllSignatures();
+        // Buscar firmas
+        const signatures = await this.getAllSignatures();
         
         console.log('Búsqueda automática de firma para:', { name, doc });
         
@@ -953,8 +953,8 @@ class SimpleAdminPDF {
             return;
         }
 
-        // Buscar en localStorage
-        const signatures = this.getAllSignatures();
+        // Buscar firmas
+        const signatures = await this.getAllSignatures();
         
         console.log('Buscando firma para:', { name, doc });
         console.log('Firmas disponibles:', signatures.map(s => ({ 
@@ -1012,33 +1012,48 @@ class SimpleAdminPDF {
         }
     }
 
-    getAllSignatures() {
+    async getAllSignatures() {
         const signatures = [];
         
-        // Buscar en el formato nuevo (array)
-        try {
-            const storedSignatures = JSON.parse(localStorage.getItem('signatures') || '[]');
-            if (Array.isArray(storedSignatures) && storedSignatures.length > 0) {
-                signatures.push(...storedSignatures);
+        if (CONFIG.USE_GOOGLE_SHEETS) {
+            // Buscar en Google Sheets - obtener todas para estadísticas
+            try {
+                const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=getAll`);
+                const data = await response.json();
+                if (Array.isArray(data)) {
+                    signatures.push(...data);
+                }
+                console.log(`Total de firmas en Google Sheets: ${signatures.length}`);
+            } catch (e) {
+                console.error('Error obteniendo firmas de Google Sheets:', e);
             }
-        } catch (e) {
-            console.error('Error parsing signatures array:', e);
-        }
-        
-        // También buscar en formato antiguo (signature_*)
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key.startsWith('signature_')) {
-                try {
-                    const data = JSON.parse(localStorage.getItem(key));
-                    signatures.push(data);
-                } catch (e) {
-                    console.error('Error parsing signature:', e);
+        } else {
+            // Buscar en localStorage (modo desarrollo)
+            try {
+                const storedSignatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+                if (Array.isArray(storedSignatures) && storedSignatures.length > 0) {
+                    signatures.push(...storedSignatures);
+                }
+            } catch (e) {
+                console.error('Error parsing signatures array:', e);
+            }
+            
+            // También buscar en formato antiguo (signature_*)
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('signature_')) {
+                    try {
+                        const data = JSON.parse(localStorage.getItem(key));
+                        signatures.push(data);
+                    } catch (e) {
+                        console.error('Error parsing signature:', e);
+                    }
                 }
             }
+            
+            console.log(`Total de firmas encontradas en localStorage: ${signatures.length}`);
         }
         
-        console.log(`Total de firmas encontradas: ${signatures.length}`);
         return signatures;
     }
 
@@ -1216,8 +1231,8 @@ class SimpleAdminPDF {
         URL.revokeObjectURL(url);
     }
 
-    updateStats() {
-        const signatures = this.getAllSignatures();
+    async updateStats() {
+        const signatures = await this.getAllSignatures();
         document.getElementById('totalSignatures').textContent = signatures.length;
         
         const hasRep = localStorage.getItem('representant_signature');
@@ -1246,7 +1261,7 @@ class SimpleAdminPDF {
                 results = await response.json();
             } else {
                 // Buscar en localStorage
-                const signatures = this.getAllSignatures();
+                const signatures = await this.getAllSignatures();
                 const searchLower = searchTerm.toLowerCase();
                 results = signatures.filter(sig => 
                     sig.fullName.toLowerCase().includes(searchLower) ||
@@ -1298,17 +1313,20 @@ class SimpleAdminPDF {
         resultsSection.style.display = 'block';
     }
 
-    selectSignatureForSigning(signatureId) {
+    async selectSignatureForSigning(signatureId) {
         // Buscar la firma seleccionada
         let signature;
         
         if (CONFIG.USE_GOOGLE_SHEETS) {
-            // En el caso de Sheets, la firma ya está en los resultados mostrados
-            const resultsList = document.getElementById('searchResultsList');
-            const signatures = this.getAllSignatures(); // Temporal mientras se carga
-            signature = signatures.find(sig => sig.id === signatureId);
+            // Buscar en Google Sheets por ID
+            try {
+                const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=getById&id=${signatureId}`);
+                signature = await response.json();
+            } catch(e) {
+                console.error('Error obteniendo firma:', e);
+            }
         } else {
-            const signatures = this.getAllSignatures();
+            const signatures = await this.getAllSignatures();
             signature = signatures.find(sig => sig.id === signatureId);
         }
 
@@ -1331,8 +1349,8 @@ class SimpleAdminPDF {
         }
     }
 
-    viewSignatureDetails(signatureId) {
-        const signatures = this.getAllSignatures();
+    async viewSignatureDetails(signatureId) {
+        const signatures = await this.getAllSignatures();
         const signature = signatures.find(sig => sig.id === signatureId);
         
         if (signature) {
