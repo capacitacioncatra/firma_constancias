@@ -1,3 +1,11 @@
+// Inicializar Firebase
+let db;
+if (CONFIG.USE_FIREBASE && typeof firebase !== 'undefined') {
+    firebase.initializeApp(CONFIG.firebase);
+    db = firebase.firestore();
+    console.log('✅ Firebase inicializado correctamente');
+}
+
 // Signature Canvas Manager
 class SignatureCapture {
     constructor(canvasId) {
@@ -236,12 +244,16 @@ class SignatureForm {
 
     async saveSignature(data) {
         try {
-            if (CONFIG.USE_FIREBASE) {
-                // TODO: Guardar en Firebase (implementaremos en el siguiente paso)
-                console.log('Firebase aún no configurado, usando localStorage temporalmente');
-                let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
-                signatures.push(data);
-                localStorage.setItem('signatures', JSON.stringify(signatures));
+            if (CONFIG.USE_FIREBASE && db) {
+                // Guardar en Firebase Firestore
+                await db.collection('signatures').doc(data.id).set({
+                    fullName: data.fullName,
+                    document: data.document,
+                    signature: data.signature,
+                    timestamp: data.timestamp,
+                    id: data.id
+                });
+                console.log('✅ Firma guardada en Firebase:', data.id);
             } else {
                 // localStorage para desarrollo
                 let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');

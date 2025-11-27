@@ -1,3 +1,11 @@
+// Inicializar Firebase
+let db;
+if (CONFIG.USE_FIREBASE && typeof firebase !== 'undefined') {
+    firebase.initializeApp(CONFIG.firebase);
+    db = firebase.firestore();
+    console.log('✅ Firebase inicializado en admin');
+}
+
 // Sistema de firmado de PDFs - Modo Local (sin servidor) con OCR
 class SimpleAdminPDF {
     constructor() {
@@ -1015,35 +1023,44 @@ class SimpleAdminPDF {
     async getAllSignatures() {
         const signatures = [];
         
-        if (CONFIG.USE_FIREBASE) {
-            // TODO: Obtener de Firebase (implementaremos después)
-            console.log('Firebase no configurado aún, usando localStorage');
-        }
-        
-        // localStorage (temporal hasta configurar Firebase)
-        try {
-            const storedSignatures = JSON.parse(localStorage.getItem('signatures') || '[]');
-            if (Array.isArray(storedSignatures) && storedSignatures.length > 0) {
-                signatures.push(...storedSignatures);
+        if (CONFIG.USE_FIREBASE && db) {
+            // Obtener de Firebase Firestore
+            try {
+                const snapshot = await db.collection('signatures').get();
+                snapshot.forEach(doc => {
+                    signatures.push(doc.data());
+                });
+                console.log(`✅ Firmas obtenidas de Firebase: ${signatures.length}`);
+            } catch (e) {
+                console.error('Error obteniendo firmas de Firebase:', e);
             }
-        } catch (e) {
-            console.error('Error parsing signatures:', e);
-        }
-        
-        // También buscar formato antiguo (signature_*)
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (key.startsWith('signature_')) {
-                try {
-                    const data = JSON.parse(localStorage.getItem(key));
-                    signatures.push(data);
-                } catch (e) {
-                    console.error('Error parsing signature:', e);
+        } else {
+            // localStorage (fallback)
+            try {
+                const storedSignatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+                if (Array.isArray(storedSignatures) && storedSignatures.length > 0) {
+                    signatures.push(...storedSignatures);
+                }
+            } catch (e) {
+                console.error('Error parsing signatures:', e);
+            }
+            
+            // También buscar formato antiguo (signature_*)
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key.startsWith('signature_')) {
+                    try {
+                        const data = JSON.parse(localStorage.getItem(key));
+                        signatures.push(data);
+                    } catch (e) {
+                        console.error('Error parsing signature:', e);
+                    }
                 }
             }
+            
+            console.log(`Total de firmas en localStorage: ${signatures.length}`);
         }
         
-        console.log(`Total de firmas: ${signatures.length}`);
         return signatures;
     }
 

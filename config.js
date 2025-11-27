@@ -1,16 +1,15 @@
 // Configuración de Firebase
-// IMPORTANTE: Reemplaza estos valores con tu configuración de Firebase
+// IMPORTANTE: Reemplaza estos valores con los que copiaste del PASO 2
 const CONFIG = {
-    // Configuración de Firebase (la obtendremos en los siguientes pasos)
     firebase: {
-        apiKey: "TU_API_KEY",
-        authDomain: "TU_PROJECT_ID.firebaseapp.com",
-        projectId: "TU_PROJECT_ID",
-        storageBucket: "TU_PROJECT_ID.appspot.com",
-        messagingSenderId: "TU_SENDER_ID",
-        appId: "TU_APP_ID"
+        apiKey: "AIzaSyB07klrTM85V2kBjHgBfnh_ywJIIeZUf24",
+        authDomain: "firma-constancias.firebaseapp.com",
+        projectId: "firma-constancias",
+        storageBucket: "firma-constancias.firebasestorage.app",
+        messagingSenderId: "830080058508",
+        appId: "1:830080058508:web:056d81042908572fd8a7a9"                                // Ejemplo: "1:123456:web:abc123"
     },
     
-    // Cambiar a false para usar localStorage en desarrollo
-    USE_FIREBASE: false // Cambiar a true cuando esté configurado
+    // Cambiar a true DESPUÉS de pegar tu configuración arriba
+    USE_FIREBASE: true
 };
