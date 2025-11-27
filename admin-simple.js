@@ -373,13 +373,12 @@ class SimpleAdminPDF {
         // Pos 10:    LETRA (sexo: H o M)
         // Pos 11-12: LETRAS (estado de nacimiento)
         // Pos 13-15: LETRAS (consonantes internas)
-        // Pos 16:    LETRA o NÚMERO (homoclave)
-        // Pos 17:    NÚMERO (dígito verificador 0-9)
+        // Pos 16-17: NÚMEROS si nació antes del 2000, LETRA+NÚMERO si nació después
         
         if (normalized.length === 18) {
             const chars = normalized.split('');
             
-            // Posiciones 4-9: DEBEN ser números (fecha nacimiento)
+            // Posiciones 4-9: DEBEN ser números (fecha nacimiento AAMMDD)
             for (let i = 4; i < 10; i++) {
                 if (chars[i] === 'O') chars[i] = '0';
                 if (chars[i] === 'I' || chars[i] === 'l') chars[i] = '1';
@@ -400,12 +399,38 @@ class SimpleAdminPDF {
                 if (chars[i] === '8') chars[i] = 'B';
             }
             
-            // Posición 17: DEBE ser número (dígito verificador)
-            if (chars[17] === 'O') chars[17] = '0';
-            if (chars[17] === 'I' || chars[17] === 'l') chars[17] = '1';
-            if (chars[17] === 'S') chars[17] = '5';
-            if (chars[17] === 'Z') chars[17] = '2';
-            if (chars[17] === 'B') chars[17] = '8';
+            // Determinar si nació antes del 2000 según el año (pos 4-5)
+            const yearStr = chars[4] + chars[5];
+            const year = parseInt(yearStr);
+            const bornBefore2000 = year >= 20 && year <= 99; // 20-99 = 1920-1999
+            
+            if (bornBefore2000) {
+                // Posiciones 16-17: AMBAS deben ser números (nacidos antes del 2000)
+                if (chars[16] === 'O') chars[16] = '0';
+                if (chars[16] === 'I' || chars[16] === 'l') chars[16] = '1';
+                if (chars[16] === 'S') chars[16] = '5';
+                if (chars[16] === 'Z') chars[16] = '2';
+                if (chars[16] === 'B') chars[16] = '8';
+                
+                if (chars[17] === 'O') chars[17] = '0';
+                if (chars[17] === 'I' || chars[17] === 'l') chars[17] = '1';
+                if (chars[17] === 'S') chars[17] = '5';
+                if (chars[17] === 'Z') chars[17] = '2';
+                if (chars[17] === 'B') chars[17] = '8';
+            } else {
+                // Posición 16: LETRA (nacidos del 2000 en adelante)
+                if (chars[16] === '0') chars[16] = 'O';
+                if (chars[16] === '1') chars[16] = 'I';
+                if (chars[16] === '5') chars[16] = 'S';
+                if (chars[16] === '8') chars[16] = 'B';
+                
+                // Posición 17: NÚMERO
+                if (chars[17] === 'O') chars[17] = '0';
+                if (chars[17] === 'I' || chars[17] === 'l') chars[17] = '1';
+                if (chars[17] === 'S') chars[17] = '5';
+                if (chars[17] === 'Z') chars[17] = '2';
+                if (chars[17] === 'B') chars[17] = '8';
+            }
             
             // Posiciones 0-3: DEBEN ser letras (apellidos y nombre)
             for (let i = 0; i < 4; i++) {
@@ -416,7 +441,7 @@ class SimpleAdminPDF {
             }
             
             normalized = chars.join('');
-            console.log('🔧 CURP normalizado según estructura oficial');
+            console.log('🔧 CURP normalizado (año:', yearStr, bornBefore2000 ? '< 2000' : '>= 2000', ')');
         }
         
         return normalized;
