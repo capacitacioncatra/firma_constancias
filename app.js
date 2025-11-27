@@ -236,35 +236,18 @@ class SignatureForm {
 
     async saveSignature(data) {
         try {
-            if (CONFIG.USE_GOOGLE_SHEETS) {
-                // Guardar en Google Sheets
-                // 1. Quitamos 'no-cors' para poder leer la respuesta del servidor
-                const response = await fetch(CONFIG.SHEETS_API_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'text/plain;charset=utf-8', // Usamos text/plain para evitar conflictos pre-flight en algunos navegadores
-                    },
-                    body: JSON.stringify({
-                        action: 'save',
-                        data: data
-                    })
-                });
-
-                // 2. Leemos la respuesta real del servidor
-                const result = await response.json();
-                
-                // 3. Verificamos si Google nos dijo "success: true"
-                if (!result.success) {
-                    throw new Error(result.error || 'Error desconocido del servidor');
-                }
-                
-                console.log('Firma guardada exitosamente en Google Sheets. ID:', result.id);
-            } else {
-                // Fallback a localStorage para desarrollo
+            if (CONFIG.USE_FIREBASE) {
+                // TODO: Guardar en Firebase (implementaremos en el siguiente paso)
+                console.log('Firebase aún no configurado, usando localStorage temporalmente');
                 let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
                 signatures.push(data);
                 localStorage.setItem('signatures', JSON.stringify(signatures));
-                console.log('Firma guardada exitosamente en localStorage:', data.id);
+            } else {
+                // localStorage para desarrollo
+                let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+                signatures.push(data);
+                localStorage.setItem('signatures', JSON.stringify(signatures));
+                console.log('Firma guardada en localStorage:', data.id);
             }
         } catch (error) {
             console.error('Error al guardar la firma:', error);

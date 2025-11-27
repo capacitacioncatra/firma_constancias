@@ -944,7 +944,7 @@ class SimpleAdminPDF {
         }
     }
 
-    searchSignature() {
+    async searchSignature() {
         const name = document.getElementById('personName').value.trim();
         const doc = document.getElementById('personDoc').value.trim();
 
@@ -1015,45 +1015,35 @@ class SimpleAdminPDF {
     async getAllSignatures() {
         const signatures = [];
         
-        if (CONFIG.USE_GOOGLE_SHEETS) {
-            // Buscar en Google Sheets - obtener todas para estadísticas
-            try {
-                const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=getAll`);
-                const data = await response.json();
-                if (Array.isArray(data)) {
-                    signatures.push(...data);
-                }
-                console.log(`Total de firmas en Google Sheets: ${signatures.length}`);
-            } catch (e) {
-                console.error('Error obteniendo firmas de Google Sheets:', e);
-            }
-        } else {
-            // Buscar en localStorage (modo desarrollo)
-            try {
-                const storedSignatures = JSON.parse(localStorage.getItem('signatures') || '[]');
-                if (Array.isArray(storedSignatures) && storedSignatures.length > 0) {
-                    signatures.push(...storedSignatures);
-                }
-            } catch (e) {
-                console.error('Error parsing signatures array:', e);
-            }
-            
-            // También buscar en formato antiguo (signature_*)
-            for (let i = 0; i < localStorage.length; i++) {
-                const key = localStorage.key(i);
-                if (key.startsWith('signature_')) {
-                    try {
-                        const data = JSON.parse(localStorage.getItem(key));
-                        signatures.push(data);
-                    } catch (e) {
-                        console.error('Error parsing signature:', e);
-                    }
-                }
-            }
-            
-            console.log(`Total de firmas encontradas en localStorage: ${signatures.length}`);
+        if (CONFIG.USE_FIREBASE) {
+            // TODO: Obtener de Firebase (implementaremos después)
+            console.log('Firebase no configurado aún, usando localStorage');
         }
         
+        // localStorage (temporal hasta configurar Firebase)
+        try {
+            const storedSignatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+            if (Array.isArray(storedSignatures) && storedSignatures.length > 0) {
+                signatures.push(...storedSignatures);
+            }
+        } catch (e) {
+            console.error('Error parsing signatures:', e);
+        }
+        
+        // También buscar formato antiguo (signature_*)
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key.startsWith('signature_')) {
+                try {
+                    const data = JSON.parse(localStorage.getItem(key));
+                    signatures.push(data);
+                } catch (e) {
+                    console.error('Error parsing signature:', e);
+                }
+            }
+        }
+        
+        console.log(`Total de firmas: ${signatures.length}`);
         return signatures;
     }
 
@@ -1143,7 +1133,7 @@ class SimpleAdminPDF {
             // Ajusta estas coordenadas según tu plantilla de documento
             const COORDENADAS = {
                 usuario: {
-                    x: 171| ,      // Posición horizontal desde la izquierda
+                    x: 171,      // Posición horizontal desde la izquierda
                     y: 1150,      // Posición vertical desde abajo
                     ancho: 400,  // Ancho de la firma
                     alto: 200     // Alto de la firma
@@ -1253,21 +1243,13 @@ class SimpleAdminPDF {
         searchBtn.textContent = '⏳ Buscando...';
 
         try {
-            let results = [];
-            
-            if (CONFIG.USE_GOOGLE_SHEETS) {
-                // Buscar en Google Sheets
-                const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=search&query=${encodeURIComponent(searchTerm)}`);
-                results = await response.json();
-            } else {
-                // Buscar en localStorage
-                const signatures = await this.getAllSignatures();
-                const searchLower = searchTerm.toLowerCase();
-                results = signatures.filter(sig => 
-                    sig.fullName.toLowerCase().includes(searchLower) ||
-                    sig.document.toLowerCase().includes(searchLower)
-                );
-            }
+            // Buscar en firmas (localStorage o Firebase)
+            const signatures = await this.getAllSignatures();
+            const searchLower = searchTerm.toLowerCase();
+            const results = signatures.filter(sig => 
+                sig.fullName.toLowerCase().includes(searchLower) ||
+                sig.document.toLowerCase().includes(searchLower)
+            );
 
             this.displaySearchResults(results);
 
@@ -1315,20 +1297,9 @@ class SimpleAdminPDF {
 
     async selectSignatureForSigning(signatureId) {
         // Buscar la firma seleccionada
-        let signature;
-        
-        if (CONFIG.USE_GOOGLE_SHEETS) {
-            // Buscar en Google Sheets por ID
-            try {
-                const response = await fetch(`${CONFIG.SHEETS_API_URL}?action=getById&id=${signatureId}`);
-                signature = await response.json();
-            } catch(e) {
-                console.error('Error obteniendo firma:', e);
-            }
-        } else {
-            const signatures = await this.getAllSignatures();
-            signature = signatures.find(sig => sig.id === signatureId);
-        }
+        // Buscar la firma por ID
+        const signatures = await this.getAllSignatures();
+        const signature = signatures.find(sig => sig.id === signatureId);
 
         if (signature) {
             // Rellenar los campos de persona
