@@ -724,14 +724,16 @@ class SimpleAdminPDF {
         const doc = document.getElementById('personDoc').value.trim();
         
         if (!name && !doc) {
-            console.log('No hay datos para buscar firma automáticamente');
+            console.log('⚠️ No hay datos para buscar firma automáticamente');
             return;
         }
         
         // Buscar firmas
         const signatures = await this.getAllSignatures();
         
-        console.log('Búsqueda automática de firma para:', { name, doc });
+        console.log('🔍 BÚSQUEDA AUTOMÁTICA DE FIRMA');
+        console.log('📝 Buscando:', { nombre: name, documento: doc });
+        console.log('📊 Total firmas disponibles:', signatures.length);
         
         // Búsqueda más flexible
         const found = signatures.find(sig => {
@@ -740,19 +742,38 @@ class SimpleAdminPDF {
             const searchName = name.toLowerCase().trim();
             const searchDoc = doc.toLowerCase().trim();
             
+            console.log('🔎 Comparando con firma:', {
+                'Firma guardada': { nombre: sigName, documento: sigDoc },
+                'Buscando': { nombre: searchName, documento: searchDoc }
+            });
+            
+            // Primero intentar por documento (más confiable)
             if (searchDoc && sigDoc) {
-                if (sigDoc === searchDoc || sigDoc.includes(searchDoc) || searchDoc.includes(sigDoc)) {
+                const docMatch = sigDoc === searchDoc || 
+                               sigDoc.includes(searchDoc) || 
+                               searchDoc.includes(sigDoc);
+                if (docMatch) {
+                    console.log('✅ ¡COINCIDENCIA POR DOCUMENTO!');
                     return true;
                 }
             }
             
+            // Luego por nombre
             if (searchName && sigName) {
+                // Coincidencia exacta
+                if (sigName === searchName) {
+                    console.log('✅ ¡COINCIDENCIA EXACTA POR NOMBRE!');
+                    return true;
+                }
+                
+                // Coincidencia parcial por palabras
                 const searchWords = searchName.split(/\s+/);
                 const sigWords = sigName.split(/\s+/);
                 const allWordsMatch = searchWords.every(word => 
                     sigWords.some(sigWord => sigWord.includes(word) || word.includes(sigWord))
                 );
                 if (allWordsMatch) {
+                    console.log('✅ ¡COINCIDENCIA PARCIAL POR NOMBRE!');
                     return true;
                 }
             }
@@ -1028,11 +1049,17 @@ class SimpleAdminPDF {
             try {
                 const snapshot = await db.collection('signatures').get();
                 snapshot.forEach(doc => {
-                    signatures.push(doc.data());
+                    const data = doc.data();
+                    signatures.push(data);
+                    console.log('📄 Firma en Firebase:', {
+                        nombre: data.fullName,
+                        documento: data.document,
+                        id: data.id
+                    });
                 });
-                console.log(`✅ Firmas obtenidas de Firebase: ${signatures.length}`);
+                console.log(`✅ Total firmas obtenidas de Firebase: ${signatures.length}`);
             } catch (e) {
-                console.error('Error obteniendo firmas de Firebase:', e);
+                console.error('❌ Error obteniendo firmas de Firebase:', e);
             }
         } else {
             // localStorage (fallback)
