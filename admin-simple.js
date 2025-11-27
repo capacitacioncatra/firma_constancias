@@ -360,51 +360,95 @@ class SimpleAdminPDF {
         return '';
     }
 
-    // Normalizar documento para corregir errores comunes del OCR
+    // Normalizar CURP corrigiendo errores comunes del OCR según estructura oficial
     normalizeDocument(doc) {
         if (!doc) return '';
         
         // Convertir a mayúsculas y quitar espacios
         let normalized = doc.toUpperCase().replace(/\s+/g, '');
         
-        // Para CURPs: formato típico AAAA######AAAAAA## 
-        // Las posiciones 4-9 (6 dígitos) y última posición DEBEN ser números
-        // Corregir O por 0 en posiciones numéricas del CURP
+        // Estructura oficial de CURP (18 caracteres):
+        // Pos 0-3:   LETRAS (apellido paterno, materno, nombre)
+        // Pos 4-9:   NÚMEROS (fecha: AAMMDD - 6 dígitos)
+        // Pos 10:    LETRA (sexo: H o M)
+        // Pos 11-12: LETRAS (estado de nacimiento)
+        // Pos 13-15: LETRAS (consonantes internas)
+        // Pos 16:    LETRA o NÚMERO (homoclave)
+        // Pos 17:    NÚMERO (dígito verificador 0-9)
+        
         if (normalized.length === 18) {
             const chars = normalized.split('');
-            // Posiciones 4-9 (fecha: 6 dígitos)
+            
+            // Posiciones 4-9: DEBEN ser números (fecha nacimiento)
             for (let i = 4; i < 10; i++) {
                 if (chars[i] === 'O') chars[i] = '0';
-                if (chars[i] === 'I') chars[i] = '1';
+                if (chars[i] === 'I' || chars[i] === 'l') chars[i] = '1';
+                if (chars[i] === 'S') chars[i] = '5';
+                if (chars[i] === 'Z') chars[i] = '2';
+                if (chars[i] === 'B') chars[i] = '8';
             }
-            // Última posición (dígito verificador)
+            
+            // Posición 10: DEBE ser letra (H o M)
+            if (chars[10] === '0') chars[10] = 'O';
+            if (chars[10] === '1') chars[10] = 'I';
+            
+            // Posiciones 11-15: DEBEN ser letras (estado y consonantes)
+            for (let i = 11; i < 16; i++) {
+                if (chars[i] === '0') chars[i] = 'O';
+                if (chars[i] === '1') chars[i] = 'I';
+                if (chars[i] === '5') chars[i] = 'S';
+                if (chars[i] === '8') chars[i] = 'B';
+            }
+            
+            // Posición 17: DEBE ser número (dígito verificador)
             if (chars[17] === 'O') chars[17] = '0';
-            if (chars[17] === 'I') chars[17] = '1';
+            if (chars[17] === 'I' || chars[17] === 'l') chars[17] = '1';
+            if (chars[17] === 'S') chars[17] = '5';
+            if (chars[17] === 'Z') chars[17] = '2';
+            if (chars[17] === 'B') chars[17] = '8';
+            
+            // Posiciones 0-3: DEBEN ser letras (apellidos y nombre)
+            for (let i = 0; i < 4; i++) {
+                if (chars[i] === '0') chars[i] = 'O';
+                if (chars[i] === '1') chars[i] = 'I';
+                if (chars[i] === '5') chars[i] = 'S';
+                if (chars[i] === '8') chars[i] = 'B';
+            }
+            
             normalized = chars.join('');
+            console.log('🔧 CURP normalizado según estructura oficial');
         }
         
         return normalized;
     }
     
     extractDocumentFromText(text) {
-        // Buscar patrones de CURP (más flexible para capturar errores del OCR)
-        const curpRegex = /[A-Z]{4}[A-Z0-9OI]{6}[HM][A-Z]{5}[A-Z0-9OI][A-Z0-9OI]/gi;
-        const curpMatch = text.match(curpRegex);
-        if (curpMatch) {
-            const normalized = this.normalizeDocument(curpMatch[0]);
-            console.log('📋 CURP extraído y normalizado:', curpMatch[0], '→', normalized);
-            return normalized;
+        // Buscar CURP con estructura: 4 letras + 6 dígitos + H/M + 5 letras + 2 caracteres
+        // Aceptamos errores comunes del OCR (O por 0, I por 1, etc)
+        const curpRegex = /[A-Z0-9]{4}[A-Z0-9OIlSZB]{6}[HM0-9][A-Z0-9]{5}[A-Z0-9OIl]{2}/gi;
+        const matches = text.match(curpRegex);
+        
+        if (matches) {
+            // Puede haber varios matches, buscar el que más se parezca a CURP
+            for (const match of matches) {
+                if (match.length === 18) {
+                    const normalized = this.normalizeDocument(match);
+                    console.log('📋 CURP detectado:', match);
+                    console.log('✅ CURP normalizado:', normalized);
+                    return normalized;
+                }
+            }
         }
 
-        // Buscar RFC
+        // Si no encontró CURP, buscar RFC (13 caracteres)
         const rfcRegex = /[A-Z&Ñ]{3,4}[A-Z0-9OI]{6}[A-Z0-9]{3}/gi;
         const rfcMatch = text.match(rfcRegex);
-        if (rfcMatch) {
-            const normalized = this.normalizeDocument(rfcMatch[0]);
-            console.log('📋 RFC extraído y normalizado:', rfcMatch[0], '→', normalized);
-            return normalized;
+        if (rfcMatch && rfcMatch[0].length === 13) {
+            console.log('📋 RFC detectado:', rfcMatch[0]);
+            return rfcMatch[0].toUpperCase().replace(/\s+/g, '');
         }
 
+        console.log('⚠️ No se detectó CURP ni RFC en el texto');
         return '';
     }
 
