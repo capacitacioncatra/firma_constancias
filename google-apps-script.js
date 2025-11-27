@@ -28,9 +28,9 @@ function doGet(e) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Firmas');
     
     if (!sheet) {
-      return ContentService.createTextOutput(JSON.stringify({
+      return createCORSResponse({
         error: 'No se encontró la hoja "Firmas"'
-      })).setMimeType(ContentService.MimeType.JSON);
+      });
     }
     
     const action = e.parameter.action;
@@ -185,4 +185,12 @@ function doPost(e) {
       error: error.toString()
     })).setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+// Función helper para crear respuestas con CORS
+function createCORSResponse(data) {
+  const output = ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
+  
+  return output;
 }
