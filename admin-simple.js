@@ -360,14 +360,50 @@ class SimpleAdminPDF {
         return '';
     }
 
+    // Normalizar documento para corregir errores comunes del OCR
+    normalizeDocument(doc) {
+        if (!doc) return '';
+        
+        // Convertir a mayúsculas y quitar espacios
+        let normalized = doc.toUpperCase().replace(/\s+/g, '');
+        
+        // Para CURPs: formato típico AAAA######AAAAAA## 
+        // Las posiciones 4-9 (6 dígitos) y última posición DEBEN ser números
+        // Corregir O por 0 en posiciones numéricas del CURP
+        if (normalized.length === 18) {
+            const chars = normalized.split('');
+            // Posiciones 4-9 (fecha: 6 dígitos)
+            for (let i = 4; i < 10; i++) {
+                if (chars[i] === 'O') chars[i] = '0';
+                if (chars[i] === 'I') chars[i] = '1';
+            }
+            // Última posición (dígito verificador)
+            if (chars[17] === 'O') chars[17] = '0';
+            if (chars[17] === 'I') chars[17] = '1';
+            normalized = chars.join('');
+        }
+        
+        return normalized;
+    }
+    
     extractDocumentFromText(text) {
-        const curpRegex = /[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d/g;
+        // Buscar patrones de CURP (más flexible para capturar errores del OCR)
+        const curpRegex = /[A-Z]{4}[A-Z0-9OI]{6}[HM][A-Z]{5}[A-Z0-9OI][A-Z0-9OI]/gi;
         const curpMatch = text.match(curpRegex);
-        if (curpMatch) return curpMatch[0];
+        if (curpMatch) {
+            const normalized = this.normalizeDocument(curpMatch[0]);
+            console.log('📋 CURP extraído y normalizado:', curpMatch[0], '→', normalized);
+            return normalized;
+        }
 
-        const rfcRegex = /[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}/g;
+        // Buscar RFC
+        const rfcRegex = /[A-Z&Ñ]{3,4}[A-Z0-9OI]{6}[A-Z0-9]{3}/gi;
         const rfcMatch = text.match(rfcRegex);
-        if (rfcMatch) return rfcMatch[0];
+        if (rfcMatch) {
+            const normalized = this.normalizeDocument(rfcMatch[0]);
+            console.log('📋 RFC extraído y normalizado:', rfcMatch[0], '→', normalized);
+            return normalized;
+        }
 
         return '';
     }
@@ -742,16 +778,20 @@ class SimpleAdminPDF {
             const searchName = name.toLowerCase().trim();
             const searchDoc = doc.toLowerCase().trim();
             
+            // Normalizar documentos para comparación (corregir O→0, I→1)
+            const sigDocNorm = this.normalizeDocument(sigDoc);
+            const searchDocNorm = this.normalizeDocument(searchDoc);
+            
             console.log('🔎 Comparando con firma:', {
-                'Firma guardada': { nombre: sigName, documento: sigDoc },
-                'Buscando': { nombre: searchName, documento: searchDoc }
+                'Firma guardada': { nombre: sigName, documento: sigDoc, docNormalizado: sigDocNorm },
+                'Buscando': { nombre: searchName, documento: searchDoc, docNormalizado: searchDocNorm }
             });
             
             // Primero intentar por documento (más confiable)
-            if (searchDoc && sigDoc) {
-                const docMatch = sigDoc === searchDoc || 
-                               sigDoc.includes(searchDoc) || 
-                               searchDoc.includes(sigDoc);
+            if (searchDocNorm && sigDocNorm) {
+                const docMatch = sigDocNorm === searchDocNorm || 
+                               sigDocNorm.includes(searchDocNorm) || 
+                               searchDocNorm.includes(sigDocNorm);
                 if (docMatch) {
                     console.log('✅ ¡COINCIDENCIA POR DOCUMENTO!');
                     return true;
