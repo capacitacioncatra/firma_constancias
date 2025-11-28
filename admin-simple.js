@@ -244,6 +244,9 @@ class SimpleAdminPDF {
         btn.disabled = true;
         btn.textContent = '⏳ Procesando...';
 
+        // Array para almacenar los PDFs firmados
+        const signedPdfs = [];
+
         for (let i = 0; i < this.filesQueue.length; i++) {
             const item = this.filesQueue[i];
             
@@ -253,14 +256,16 @@ class SimpleAdminPDF {
             this.displayFilesQueue();
 
             try {
-                // Procesar archivo
-                await this.processSingleFileInQueue(item);
+                // Procesar archivo (sin descargar)
+                await this.processSingleFileInQueue(item, false); // false = no descargar individualmente
                 
                 item.status = 'completed';
                 this.processedFiles.push(item);
+                signedPdfs.push(item.signedPdfBytes); // Guardar PDF firmado
             } catch (error) {
                 console.error('Error procesando archivo:', error);
                 item.status = 'error';
+                item.errorMessage = error.message;
             }
 
             this.displayFilesQueue();
@@ -272,7 +277,22 @@ class SimpleAdminPDF {
         const completed = this.filesQueue.filter(f => f.status === 'completed').length;
         const errors = this.filesQueue.filter(f => f.status === 'error').length;
         
-        alert(`✅ Proceso completado!\n\n✓ ${completed} archivos firmados\n${errors > 0 ? `✗ ${errors} archivos con error` : ''}`);
+        if (completed > 0) {
+            // Combinar todos los PDFs en uno solo
+            console.log(`📑 Combinando ${completed} PDFs en un solo archivo...`);
+            try {
+                const combinedPdf = await this.combinePdfs(signedPdfs);
+                const today = new Date().toISOString().split('T')[0];
+                this.downloadPdf(combinedPdf, `Constancias_Firmadas_${today}.pdf`);
+                
+                alert(`✅ Proceso completado!\n\n✓ ${completed} archivos firmados\n✓ Descargando PDF combinado\n${errors > 0 ? `\n✗ ${errors} archivos con error` : ''}`);
+            } catch (error) {
+                console.error('Error combinando PDFs:', error);
+                alert(`⚠️ Archivos procesados pero hubo un error al combinarlos.\n\n✓ ${completed} firmados\n✗ ${errors} con error`);
+            }
+        } else {
+            alert(`❌ No se pudo procesar ningún archivo.\n\n✗ ${errors} archivos con error`);
+        }
     }
 
     async processSingleFileInQueue(item) {
@@ -397,8 +417,13 @@ class SimpleAdminPDF {
         // Firmar PDF
         const signedPdf = await this.signPdfForQueue(item);
         
-        // Descargar
-        this.downloadPdf(signedPdf, found.fullName);
+        // Guardar bytes del PDF firmado
+        item.signedPdfBytes = signedPdf;
+        
+        // Descargar solo si se pasa el parámetro (para procesamiento individual)
+        if (arguments[1] !== false) {
+            this.downloadPdf(signedPdf, found.fullName);
+        }
     }
 
     extractNameFromText(text) {
@@ -1550,6 +1575,41 @@ class SimpleAdminPDF {
         return this.base64ToArrayBuffer(base64);
     }
 
+    async combinePdfs(pdfBytesArray) {
+        // Crear un nuevo PDF que contendrá todas las páginas
+        const combinedPdf = await PDFLib.PDFDocument.create();
+        
+        console.log(`📑 Combinando ${pdfBytesArray.length} PDFs...`);
+        
+        for (let i = 0; i < pdfBytesArray.length; i++) {
+            try {
+                const pdfBytes = pdfBytesArray[i];
+                
+                // Cargar el PDF individual
+                const pdf = await PDFLib.PDFDocument.load(pdfBytes);
+                
+                // Copiar todas las páginas del PDF al PDF combinado
+                const pages = await combinedPdf.copyPages(pdf, pdf.getPageIndices());
+                
+                // Agregar cada página al PDF combinado
+                pages.forEach(page => {
+                    combinedPdf.addPage(page);
+                });
+                
+                console.log(`✅ PDF ${i + 1}/${pdfBytesArray.length} agregado (${pages.length} página(s))`);
+            } catch (error) {
+                console.error(`❌ Error agregando PDF ${i + 1}:`, error);
+                // Continuar con los demás PDFs aunque uno falle
+            }
+        }
+        
+        // Generar el PDF combinado
+        const combinedPdfBytes = await combinedPdf.save();
+        console.log(`✅ PDF combinado generado: ${combinedPdfBytes.length} bytes`);
+        
+        return combinedPdfBytes;
+    }
+    
     downloadPdf(pdfBytes, personName) {
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
