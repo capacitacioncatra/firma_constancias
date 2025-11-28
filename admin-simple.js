@@ -321,25 +321,73 @@ class SimpleAdminPDF {
         }
 
         // OCR para extraer nombre/CURP
+        console.log(`📄 Procesando: ${item.name}`);
         const worker = await Tesseract.createWorker('spa', 1);
         const { data: { text } } = await worker.recognize(item.imageData);
         await worker.terminate();
 
-        // Buscar firma
+        // Buscar firma usando la misma lógica que autoSearchSignature
         const name = this.extractNameFromText(text);
         const doc = this.extractDocumentFromText(text);
         
+        console.log(`🔍 Datos detectados en ${item.name}:`, { nombre: name, documento: doc });
+        
         const signatures = await this.getAllSignatures();
+        
+        // Usar la misma búsqueda flexible que autoSearchSignature
         const found = signatures.find(sig => {
+            const sigName = (sig.fullName || '').toLowerCase().trim();
             const sigDoc = (sig.document || '').toLowerCase().trim();
+            const searchName = name.toLowerCase().trim();
             const searchDoc = doc.toLowerCase().trim();
-            return sigDoc && searchDoc && (sigDoc === searchDoc || sigDoc.includes(searchDoc));
+            
+            // Normalizar documentos
+            const sigDocNorm = this.normalizeDocument(sigDoc);
+            const searchDocNorm = this.normalizeDocument(searchDoc);
+            
+            // PRIORIDAD 1: Buscar por NOMBRE
+            if (searchName && sigName) {
+                // Coincidencia exacta
+                if (sigName === searchName) {
+                    console.log(`✅ Coincidencia por nombre para ${item.name}`);
+                    return true;
+                }
+                
+                // Coincidencia parcial por palabras
+                const searchWords = searchName.split(/\s+/).filter(w => w.length > 2);
+                const sigWords = sigName.split(/\s+/).filter(w => w.length > 2);
+                
+                const matchCount = searchWords.filter(word => 
+                    sigWords.some(sigWord => sigWord.includes(word) || word.includes(sigWord))
+                ).length;
+                
+                if (matchCount >= 2) {
+                    console.log(`✅ Coincidencia por nombre (${matchCount} palabras) para ${item.name}`);
+                    return true;
+                }
+            }
+            
+            // PRIORIDAD 2: Buscar por CURP/RFC
+            if (searchDocNorm && sigDocNorm) {
+                if (sigDocNorm === searchDocNorm) {
+                    console.log(`✅ Coincidencia por CURP para ${item.name}`);
+                    return true;
+                }
+                if (sigDocNorm.includes(searchDocNorm) || searchDocNorm.includes(sigDocNorm)) {
+                    console.log(`✅ Coincidencia parcial por CURP para ${item.name}`);
+                    return true;
+                }
+            }
+            
+            return false;
         });
 
         if (!found) {
-            throw new Error('Firma no encontrada para este documento');
+            console.error(`❌ No se encontró firma para ${item.name}`);
+            throw new Error(`Firma no encontrada: ${name || doc || 'sin datos detectados'}`);
         }
 
+        console.log(`✅ Firma encontrada para ${item.name}:`, found.fullName);
         item.signature = found;
 
         // Firmar PDF
