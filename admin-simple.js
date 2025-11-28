@@ -361,8 +361,11 @@ class SimpleAdminPDF {
         // OCR para extraer nombre/CURP
         console.log(`📄 Procesando: ${item.name}`);
         
-        // ✅ MEJORA: Preprocesar imagen para mejor OCR
-        const processedImage = await this.preprocessImageForOCR(item.imageData);
+        // ✅ PASO 1: Normalizar tamaño de imagen
+        const normalizedImage = await this.normalizeImageSize(item.imageData);
+        
+        // ✅ PASO 2: Preprocesar imagen para mejor OCR (contraste)
+        const processedImage = await this.preprocessImageForOCR(normalizedImage);
         
         const worker = await Tesseract.createWorker('spa', 1);
         const { data: { text } } = await worker.recognize(processedImage);
@@ -955,6 +958,49 @@ class SimpleAdminPDF {
         });
     }
 
+    // Normalizar tamaño de imagen para OCR óptimo
+    normalizeImageSize(imageData) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                // Tamaño óptimo para OCR: 1600-2400px de ancho
+                const TARGET_WIDTH = 2000;
+                const MAX_WIDTH = 2400;
+                const MIN_WIDTH = 1600;
+                
+                let newWidth = img.width;
+                let newHeight = img.height;
+                
+                console.log(`📐 Tamaño original: ${img.width}x${img.height}px`);
+                
+                // Si la imagen es muy pequeña o muy grande, redimensionar
+                if (img.width < MIN_WIDTH || img.width > MAX_WIDTH) {
+                    const scale = TARGET_WIDTH / img.width;
+                    newWidth = TARGET_WIDTH;
+                    newHeight = Math.round(img.height * scale);
+                    console.log(`🔄 Redimensionando a: ${newWidth}x${newHeight}px (escala: ${scale.toFixed(2)})`);
+                } else {
+                    console.log('✅ Tamaño ya es óptimo para OCR');
+                }
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = newWidth;
+                canvas.height = newHeight;
+                const ctx = canvas.getContext('2d');
+                
+                // Usar interpolación de alta calidad para mejor resultado
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+                
+                // Dibujar imagen redimensionada
+                ctx.drawImage(img, 0, 0, newWidth, newHeight);
+                
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.src = imageData;
+        });
+    }
+    
     // Preprocesar imagen para mejorar OCR: aumentar contraste y eliminar sombras
     preprocessImageForOCR(imageData) {
         return new Promise((resolve) => {
@@ -1006,10 +1052,14 @@ class SimpleAdminPDF {
             
             // Actualizar progreso
             this.updateProgress(10, 'Imagen cargada...');
-            this.updateProgress(15, 'Mejorando contraste de imagen...');
             
-            // ✅ MEJORA: Preprocesar imagen para mejor OCR
-            const processedImage = await this.preprocessImageForOCR(imageData);
+            // ✅ PASO 1: Normalizar tamaño de imagen
+            this.updateProgress(12, 'Normalizando tamaño de imagen...');
+            const normalizedImage = await this.normalizeImageSize(imageData);
+            
+            // ✅ PASO 2: Preprocesar imagen para mejor OCR (contraste)
+            this.updateProgress(15, 'Mejorando contraste de imagen...');
+            const processedImage = await this.preprocessImageForOCR(normalizedImage);
             
             this.updateProgress(20, 'Iniciando OCR (esto puede tardar 30-60 segundos)...');
             
