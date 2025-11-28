@@ -351,12 +351,27 @@ class SimpleAdminPDF {
 
     extractNameFromText(text) {
         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        
+        // Buscar líneas que sean nombres completos (2-4 palabras en mayúsculas)
+        // El nombre en la constancia suele estar en MAYÚSCULAS y ser largo
         for (const line of lines) {
-            if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3}$/.test(line) && 
-                line.length > 10 && line.length < 50) {
+            // Nombre todo en MAYÚSCULAS (como en la constancia)
+            if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){1,4}$/.test(line) && 
+                line.length > 15 && line.length < 60) {
+                console.log('👤 Nombre detectado (mayúsculas):', line);
                 return line;
             }
         }
+        
+        // Fallback: buscar patrón capitalizado normal
+        for (const line of lines) {
+            if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3}$/.test(line) && 
+                line.length > 10 && line.length < 50) {
+                console.log('👤 Nombre detectado (capitalizado):', line);
+                return line;
+            }
+        }
+        
         return '';
     }
 
@@ -829,7 +844,7 @@ class SimpleAdminPDF {
         const doc = document.getElementById('personDoc').value.trim();
         
         if (!name && !doc) {
-            console.log('⚠️ No hay datos para buscar firma automáticamente');
+            console.log('⚠️ No se detectaron datos, no se puede buscar firma automáticamente');
             return;
         }
         
@@ -837,10 +852,12 @@ class SimpleAdminPDF {
         const signatures = await this.getAllSignatures();
         
         console.log('🔍 BÚSQUEDA AUTOMÁTICA DE FIRMA');
-        console.log('📝 Buscando:', { nombre: name, documento: doc });
+        console.log('📝 Nombre detectado:', name || 'no detectado');
+        console.log('📝 CURP/RFC detectado:', doc || 'no detectado');
         console.log('📊 Total firmas disponibles:', signatures.length);
         
-        // Búsqueda más flexible
+        // Búsqueda PRIORIDAD 1: Por NOMBRE (más fácil de detectar en OCR)
+        // PRIORIDAD 2: Por CURP/RFC (confirmación adicional)
         const found = signatures.find(sig => {
             const sigName = (sig.fullName || '').toLowerCase().trim();
             const sigDoc = (sig.document || '').toLowerCase().trim();
@@ -852,22 +869,13 @@ class SimpleAdminPDF {
             const searchDocNorm = this.normalizeDocument(searchDoc);
             
             console.log('🔎 Comparando con firma:', {
-                'Firma guardada': { nombre: sigName, documento: sigDoc, docNormalizado: sigDocNorm },
-                'Buscando': { nombre: searchName, documento: searchDoc, docNormalizado: searchDocNorm }
+                'Nombre guardado': sigName,
+                'Nombre detectado': searchName,
+                'CURP guardada': sigDoc + ' → ' + sigDocNorm,
+                'CURP detectada': searchDoc + ' → ' + searchDocNorm
             });
             
-            // Primero intentar por documento (más confiable)
-            if (searchDocNorm && sigDocNorm) {
-                const docMatch = sigDocNorm === searchDocNorm || 
-                               sigDocNorm.includes(searchDocNorm) || 
-                               searchDocNorm.includes(sigDocNorm);
-                if (docMatch) {
-                    console.log('✅ ¡COINCIDENCIA POR DOCUMENTO!');
-                    return true;
-                }
-            }
-            
-            // Luego por nombre
+            // PRIORIDAD 1: Buscar por NOMBRE (el texto grande es más confiable)
             if (searchName && sigName) {
                 // Coincidencia exacta
                 if (sigName === searchName) {
@@ -875,14 +883,29 @@ class SimpleAdminPDF {
                     return true;
                 }
                 
-                // Coincidencia parcial por palabras
-                const searchWords = searchName.split(/\s+/);
-                const sigWords = sigName.split(/\s+/);
-                const allWordsMatch = searchWords.every(word => 
+                // Coincidencia parcial por palabras (apellidos pueden estar en orden diferente)
+                const searchWords = searchName.split(/\s+/).filter(w => w.length > 2);
+                const sigWords = sigName.split(/\s+/).filter(w => w.length > 2);
+                
+                const matchCount = searchWords.filter(word => 
                     sigWords.some(sigWord => sigWord.includes(word) || word.includes(sigWord))
-                );
-                if (allWordsMatch) {
-                    console.log('✅ ¡COINCIDENCIA PARCIAL POR NOMBRE!');
+                ).length;
+                
+                // Si coinciden al menos 2 palabras significativas
+                if (matchCount >= 2) {
+                    console.log('✅ ¡COINCIDENCIA POR NOMBRE! (', matchCount, 'palabras)');
+                    return true;
+                }
+            }
+            
+            // PRIORIDAD 2: Buscar por CURP/RFC (confirmación adicional)
+            if (searchDocNorm && sigDocNorm) {
+                if (sigDocNorm === searchDocNorm) {
+                    console.log('✅ ¡COINCIDENCIA EXACTA POR CURP/RFC!');
+                    return true;
+                }
+                if (sigDocNorm.includes(searchDocNorm) || searchDocNorm.includes(sigDocNorm)) {
+                    console.log('✅ ¡COINCIDENCIA PARCIAL POR CURP/RFC!');
                     return true;
                 }
             }
@@ -1036,49 +1059,31 @@ class SimpleAdminPDF {
     }
 
     autoFillData(text) {
-        // Buscar CURP (18 caracteres alfanuméricos)
-        const curpRegex = /[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d/g;
-        const curpMatch = text.match(curpRegex);
+        console.log('📄 Extrayendo datos del documento...');
         
-        if (curpMatch && curpMatch[0]) {
-            document.getElementById('personDoc').value = curpMatch[0];
+        // PRIORIDAD 1: Buscar CURP/RFC usando la función extractDocumentFromText
+        const doc = this.extractDocumentFromText(text);
+        if (doc) {
+            document.getElementById('personDoc').value = doc;
+            console.log('✅ CURP/RFC detectado:', doc);
+        } else {
+            console.log('⚠️ No se detectó CURP/RFC en el documento');
         }
         
-        // Buscar RFC (13 caracteres)
-        const rfcRegex = /[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}/g;
-        const rfcMatch = text.match(rfcRegex);
-        
-        if (!curpMatch && rfcMatch && rfcMatch[0]) {
-            document.getElementById('personDoc').value = rfcMatch[0];
+        // OPCIONAL: Intentar detectar nombre (solo como referencia)
+        const name = this.extractNameFromText(text);
+        if (name) {
+            document.getElementById('personName').value = name;
+            console.log('✅ Nombre detectado:', name);
+        } else {
+            console.log('⚠️ No se detectó nombre (no es crítico si hay CURP)');
         }
         
-        // Intentar detectar nombre (líneas con palabras capitalizadas)
-        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        
-        // Buscar patrones comunes de nombres
-        const namePatterns = [
-            /(?:nombre|name|titular|beneficiario)[\s:]+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)/i,
-            /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)$/,
-        ];
-        
-        for (const line of lines) {
-            for (const pattern of namePatterns) {
-                const match = line.match(pattern);
-                if (match && match[1]) {
-                    document.getElementById('personName').value = match[1];
-                    return;
-                }
-            }
-        }
-        
-        // Si no encontramos patrón específico, buscar la línea más probable
-        for (const line of lines) {
-            // Línea con 2-4 palabras capitalizadas, longitud razonable
-            if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3}$/.test(line) && 
-                line.length > 10 && line.length < 50) {
-                document.getElementById('personName').value = line;
-                return;
-            }
+        // Resumen
+        if (doc) {
+            console.log('💡 Con CURP/RFC es suficiente para buscar la firma');
+        } else {
+            console.log('❌ Sin CURP/RFC no se podrá buscar automáticamente');
         }
     }
 
