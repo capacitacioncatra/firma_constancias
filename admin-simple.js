@@ -22,14 +22,14 @@ class SimpleAdminPDF {
         // Ajusta estas coordenadas según tu plantilla de documento
         this.COORDENADAS = {
             usuario: {
-                x: 150,      // Posición horizontal desde la izquierda
-                y: 1050,     // Posición vertical desde abajo
+                x: 170,      // Posición horizontal desde la izquierda
+                y: 1000,     // Posición vertical desde abajo
                 ancho: 400,  // Ancho de la firma
                 alto: 200    // Alto de la firma
             },
             representante: {
                 x: 600,      // Posición horizontal desde la izquierda
-                y: 1030,     // Posición vertical desde abajo
+                y: 1000,     // Posición vertical desde abajo
                 ancho: 500,  // Ancho de la firma
                 alto: 200    // Alto de la firma
             }
