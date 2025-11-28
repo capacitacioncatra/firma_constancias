@@ -351,27 +351,58 @@ class SimpleAdminPDF {
 
     extractNameFromText(text) {
         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const totalLines = lines.length;
         
-        // Buscar líneas que sean nombres completos (2-4 palabras en mayúsculas)
-        // El nombre en la constancia suele estar en MAYÚSCULAS y ser largo
-        for (const line of lines) {
+        console.log('📄 Total líneas detectadas:', totalLines);
+        console.log('🎯 Buscando nombre en zona central del documento (40%-70%)...');
+        
+        // Calcular zona central (donde suele estar el nombre grande)
+        const startLine = Math.floor(totalLines * 0.30); // 30% desde arriba
+        const endLine = Math.floor(totalLines * 0.70);   // 70% desde arriba
+        
+        console.log(`📍 Analizando líneas ${startLine} a ${endLine} (zona central)`);
+        
+        // PRIORIDAD 1: Buscar en la zona central (30%-70%)
+        for (let i = startLine; i < endLine && i < lines.length; i++) {
+            const line = lines[i];
+            
             // Nombre todo en MAYÚSCULAS (como en la constancia)
             if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){1,4}$/.test(line) && 
-                line.length > 15 && line.length < 60) {
-                console.log('👤 Nombre detectado (mayúsculas):', line);
+                line.length > 15 && line.length < 60 &&
+                !line.includes('CONSTANCIA') &&
+                !line.includes('CAPACITACIÓN') &&
+                !line.includes('CENTRO') &&
+                !line.includes('DENOMINADO')) {
+                console.log('✅ Nombre encontrado en zona central (línea', i, '):', line);
                 return line;
             }
         }
         
-        // Fallback: buscar patrón capitalizado normal
+        console.log('⚠️ No se encontró en zona central, buscando en todo el documento...');
+        
+        // PRIORIDAD 2: Buscar en todo el documento
+        for (const line of lines) {
+            // Nombre todo en MAYÚSCULAS
+            if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){1,4}$/.test(line) && 
+                line.length > 15 && line.length < 60 &&
+                !line.includes('CONSTANCIA') &&
+                !line.includes('CAPACITACIÓN') &&
+                !line.includes('CENTRO')) {
+                console.log('✅ Nombre detectado (mayúsculas):', line);
+                return line;
+            }
+        }
+        
+        // PRIORIDAD 3: Fallback - buscar patrón capitalizado normal
         for (const line of lines) {
             if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3}$/.test(line) && 
                 line.length > 10 && line.length < 50) {
-                console.log('👤 Nombre detectado (capitalizado):', line);
+                console.log('✅ Nombre detectado (capitalizado):', line);
                 return line;
             }
         }
         
+        console.log('❌ No se pudo detectar el nombre');
         return '';
     }
 
@@ -463,13 +494,41 @@ class SimpleAdminPDF {
     }
     
     extractDocumentFromText(text) {
+        const lines = text.split('\n');
+        const totalLines = lines.length;
+        
+        console.log('🎯 Buscando CURP en zona inferior del documento (40%-80%)...');
+        
+        // La CURP suele estar en la mitad-inferior del documento
+        const startLine = Math.floor(totalLines * 0.40); // 40% desde arriba
+        const endLine = Math.floor(totalLines * 0.80);   // 80% desde arriba
+        const centralText = lines.slice(startLine, endLine).join('\n');
+        
+        console.log(`📍 Analizando zona: líneas ${startLine} a ${endLine}`);
+        
         // Buscar CURP con estructura: 4 letras + 6 dígitos + H/M + 5 letras + 2 caracteres
         // Aceptamos errores comunes del OCR (O por 0, I por 1, etc)
         const curpRegex = /[A-Z0-9]{4}[A-Z0-9OIlSZB]{6}[HM0-9][A-Z0-9]{5}[A-Z0-9OIl]{2}/gi;
-        const matches = text.match(curpRegex);
+        
+        // PRIORIDAD 1: Buscar en zona central-inferior
+        let matches = centralText.match(curpRegex);
         
         if (matches) {
-            // Puede haber varios matches, buscar el que más se parezca a CURP
+            for (const match of matches) {
+                if (match.length === 18) {
+                    const normalized = this.normalizeDocument(match);
+                    console.log('✅ CURP encontrado en zona inferior:', match);
+                    console.log('🔧 CURP normalizado:', normalized);
+                    return normalized;
+                }
+            }
+        }
+        
+        console.log('⚠️ No encontrado en zona inferior, buscando en todo el documento...');
+        
+        // PRIORIDAD 2: Buscar en todo el documento
+        matches = text.match(curpRegex);
+        if (matches) {
             for (const match of matches) {
                 if (match.length === 18) {
                     const normalized = this.normalizeDocument(match);
@@ -488,7 +547,7 @@ class SimpleAdminPDF {
             return rfcMatch[0].toUpperCase().replace(/\s+/g, '');
         }
 
-        console.log('⚠️ No se detectó CURP ni RFC en el texto');
+        console.log('❌ No se detectó CURP ni RFC en el documento');
         return '';
     }
 
