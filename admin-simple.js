@@ -361,10 +361,25 @@ class SimpleAdminPDF {
         // OCR para extraer nombre/CURP
         console.log(`📄 Procesando: ${item.name}`);
         
-        // ✅ MEJORA: Preprocesar imagen para mejor OCR
+        // ✅ MEJORAS: Preprocesar con OTSU, escala de grises y reducción de ruido
         const processedImage = await this.preprocessImageForOCR(item.imageData);
         
+        // ✅ MEJORAS 3, 8: Configurar Tesseract para lotes también
         const worker = await Tesseract.createWorker('spa', 1);
+        await worker.setParameters({
+            tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
+            load_system_dawg: '0',
+            load_freq_dawg: '0',
+            load_unambig_dawg: '0',
+            load_punc_dawg: '0',
+            load_number_dawg: '0',
+            load_fixedlength_dawg: '0',
+            load_bigram_dawg: '0',
+            wordrec_enable_assoc: '0',
+            language_model_penalty_non_dict_word: '0',
+            language_model_penalty_non_freq_dict_word: '0'
+        });
+        
         const { data: { text } } = await worker.recognize(processedImage);
         await worker.terminate();
 
@@ -471,16 +486,23 @@ class SimpleAdminPDF {
                 // Saltar primeras 1-3 líneas (puede haber "A" o texto extra)
                 if (skipCount <= 3) continue;
                 
-                // Buscar nombre en MAYÚSCULAS (3-5 palabras, 20-50 caracteres)
+                // ✅ MEJORA 9: Filtros más robustos para nombre
+                // 3-5 palabras, todas mayúsculas, sin palabras prohibidas
+                const wordCount = line.split(/\s+/).length;
+                const forbiddenWords = [
+                    'FEDERAL', 'TRANSPORTE', 'DENOMINADO', 'REGISTRO', 'FOLIO',
+                    'CONTROL', 'EXTIENDE', 'PRESENTE', 'CONDUCTORES', 'CAPACITACIÓN',
+                    'ADIESTRAMIENTO', 'CENTRO', 'SERVICIO', 'AUTOTRANSPORTE',
+                    'PRIVADO', 'GENERAL', 'NACIONAL', 'CARGA', 'PERIODO',
+                    'DURACIÓN', 'HORAS', 'PROGRAMA', 'INTEGRAL', 'LICENCIA'
+                ];
+                
+                const hasForbiddenWord = forbiddenWords.some(word => line.includes(word));
+                
                 if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){2,4}$/.test(line) && 
-                    line.length >= 20 && line.length <= 50 &&
-                    !line.includes('FEDERAL') &&
-                    !line.includes('TRANSPORTE') &&
-                    !line.includes('DENOMINADO') &&
-                    !line.includes('REGISTRO') &&
-                    !line.includes('FOLIO') &&
-                    !line.includes('CONTROL') &&
-                    !line.includes('EXTIENDE')) {
+                    wordCount >= 3 && wordCount <= 5 &&
+                    line.length >= 20 && line.length <= 60 &&
+                    !hasForbiddenWord) {
                     console.log('✅ Nombre encontrado después de CONSTANCIA (línea', i, '):', line);
                     return line;
                 }
@@ -492,19 +514,24 @@ class SimpleAdminPDF {
         
         console.log('⚠️ Estrategia 1 falló, intentando estrategia 2...');
         
-        // ESTRATEGIA 2: Buscar la línea más larga en MAYÚSCULAS (suele ser el nombre)
+        // ✅ MEJORA 9: ESTRATEGIA 2 mejorada con filtros robustos
+        const forbiddenWords = [
+            'CAPACITACIÓN', 'ADIESTRAMIENTO', 'CONDUCTORES', 'FEDERAL',
+            'TRANSPORTE', 'CENTRO', 'CONSTANCIA', 'SERVICIO', 'AUTOTRANSPORTE',
+            'DENOMINADO', 'REGISTRO', 'PRESENTE', 'EXTIENDE'
+        ];
+        
         let longestName = '';
         let longestLength = 0;
         
         for (const line of lines) {
+            const wordCount = line.split(/\s+/).length;
+            const hasForbiddenWord = forbiddenWords.some(word => line.includes(word));
+            
             if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){2,4}$/.test(line) && 
-                line.length >= 20 && line.length <= 50 &&
-                !line.includes('CAPACITACIÓN') &&
-                !line.includes('ADIESTRAMIENTO') &&
-                !line.includes('CONDUCTORES') &&
-                !line.includes('FEDERAL') &&
-                !line.includes('TRANSPORTE') &&
-                !line.includes('CENTRO')) {
+                wordCount >= 3 && wordCount <= 5 &&
+                line.length >= 20 && line.length <= 60 &&
+                !hasForbiddenWord) {
                 if (line.length > longestLength) {
                     longestLength = line.length;
                     longestName = line;
@@ -878,8 +905,8 @@ class SimpleAdminPDF {
             // Obtener primera página
             const page = await pdf.getPage(1);
             
-            // Configurar canvas
-            const scale = 2.0; // Escala alta para mejor OCR
+            // Configurar canvas con escala muy alta para OCR óptimo
+            const scale = 4.5; // ✅ MEJORA 1: Escala 4.5 para máxima nitidez
             const viewport = page.getViewport({ scale });
             
             const canvas = document.createElement('canvas');
@@ -972,22 +999,88 @@ class SimpleAdminPDF {
                 const imageDataObj = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const data = imageDataObj.data;
                 
-                // Aumentar contraste drásticamente y convertir a escala de grises
-                const contrastFactor = 2.5; // Factor de contraste alto
-                const brightnessOffset = -30; // Reducir brillo para eliminar fondos claros
-                
+                // ✅ MEJORA 6: Convertir a escala de grises primero (correctamente)
                 for (let i = 0; i < data.length; i += 4) {
-                    // Convertir a escala de grises
                     const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                    data[i] = data[i + 1] = data[i + 2] = gray;
+                }
+                
+                // ✅ MEJORA 2: Binarización adaptativa tipo OTSU
+                // Calcular umbral óptimo automáticamente
+                const histogram = new Array(256).fill(0);
+                for (let i = 0; i < data.length; i += 4) {
+                    histogram[data[i]]++;
+                }
+                
+                const total = canvas.width * canvas.height;
+                let sum = 0;
+                for (let i = 0; i < 256; i++) {
+                    sum += i * histogram[i];
+                }
+                
+                let sumB = 0;
+                let wB = 0;
+                let wF = 0;
+                let maxVariance = 0;
+                let threshold = 0;
+                
+                for (let i = 0; i < 256; i++) {
+                    wB += histogram[i];
+                    if (wB === 0) continue;
                     
-                    // Aplicar contraste y brillo
-                    let adjusted = ((gray - 128) * contrastFactor) + 128 + brightnessOffset;
+                    wF = total - wB;
+                    if (wF === 0) break;
                     
-                    // Binarizar: si es muy claro, blanco puro; si es oscuro, negro puro
-                    adjusted = adjusted > 180 ? 255 : adjusted < 80 ? 0 : adjusted;
+                    sumB += i * histogram[i];
+                    const mB = sumB / wB;
+                    const mF = (sum - sumB) / wF;
+                    const variance = wB * wF * (mB - mF) * (mB - mF);
                     
-                    // Asignar valor ajustado
-                    data[i] = data[i + 1] = data[i + 2] = adjusted;
+                    if (variance > maxVariance) {
+                        maxVariance = variance;
+                        threshold = i;
+                    }
+                }
+                
+                console.log('🎯 Umbral OTSU calculado:', threshold);
+                
+                // ✅ MEJORA 7: Aplicar contraste alto antes de binarizar
+                const contrastFactor = 3.0; // Contraste más fuerte
+                for (let i = 0; i < data.length; i += 4) {
+                    let gray = data[i];
+                    // Aplicar contraste
+                    gray = ((gray - 128) * contrastFactor) + 128;
+                    gray = Math.max(0, Math.min(255, gray));
+                    data[i] = data[i + 1] = data[i + 2] = gray;
+                }
+                
+                // Aplicar binarización con umbral OTSU
+                for (let i = 0; i < data.length; i += 4) {
+                    const value = data[i] > threshold ? 255 : 0;
+                    data[i] = data[i + 1] = data[i + 2] = value;
+                }
+                
+                // ✅ MEJORA 7: Reducción de ruido (eliminar puntos aislados)
+                const tempData = new Uint8ClampedArray(data);
+                for (let y = 1; y < canvas.height - 1; y++) {
+                    for (let x = 1; x < canvas.width - 1; x++) {
+                        const idx = (y * canvas.width + x) * 4;
+                        
+                        // Contar vecinos negros
+                        let blackNeighbors = 0;
+                        for (let dy = -1; dy <= 1; dy++) {
+                            for (let dx = -1; dx <= 1; dx++) {
+                                if (dx === 0 && dy === 0) continue;
+                                const nIdx = ((y + dy) * canvas.width + (x + dx)) * 4;
+                                if (tempData[nIdx] === 0) blackNeighbors++;
+                            }
+                        }
+                        
+                        // Si es un punto aislado, eliminarlo
+                        if (tempData[idx] === 0 && blackNeighbors < 2) {
+                            data[idx] = data[idx + 1] = data[idx + 2] = 255;
+                        }
+                    }
                 }
                 
                 ctx.putImageData(imageDataObj, 0, 0);
@@ -1006,14 +1099,14 @@ class SimpleAdminPDF {
             
             // Actualizar progreso
             this.updateProgress(10, 'Imagen cargada...');
-            this.updateProgress(15, 'Mejorando contraste de imagen...');
+            this.updateProgress(15, 'Aplicando binarización adaptativa (OTSU)...');
             
-            // ✅ MEJORA: Preprocesar imagen para mejor OCR
+            // ✅ MEJORAS 2, 6, 7: Preprocesar con OTSU, escala de grises y reducción de ruido
             const processedImage = await this.preprocessImageForOCR(imageData);
             
-            this.updateProgress(20, 'Iniciando OCR (esto puede tardar 30-60 segundos)...');
+            this.updateProgress(20, 'Iniciando OCR optimizado...');
             
-            // Realizar OCR con imagen preprocesada
+            // ✅ MEJORAS 3, 8: Configurar Tesseract con PSM y modo LSTM
             const worker = await Tesseract.createWorker('spa', 1, {
                 logger: m => {
                     if (m.status === 'recognizing text') {
@@ -1021,6 +1114,22 @@ class SimpleAdminPDF {
                         this.updateProgress(progress, `Extrayendo texto: ${Math.round(m.progress * 100)}%`);
                     }
                 }
+            });
+            
+            // Configurar parámetros de Tesseract para mejor precisión
+            await worker.setParameters({
+                tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK, // PSM 6: Bloque uniforme de texto
+                tessedit_char_whitelist: '', // Sin restricción general (aplicaremos específica después)
+                load_system_dawg: '0',  // ✅ MEJORA 8: Deshabilitar diccionarios
+                load_freq_dawg: '0',
+                load_unambig_dawg: '0',
+                load_punc_dawg: '0',
+                load_number_dawg: '0',
+                load_fixedlength_dawg: '0',
+                load_bigram_dawg: '0',
+                wordrec_enable_assoc: '0',
+                language_model_penalty_non_dict_word: '0',
+                language_model_penalty_non_freq_dict_word: '0'
             });
             
             const { data: { text } } = await worker.recognize(processedImage);
