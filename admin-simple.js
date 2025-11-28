@@ -322,8 +322,12 @@ class SimpleAdminPDF {
 
         // OCR para extraer nombre/CURP
         console.log(`📄 Procesando: ${item.name}`);
+        
+        // ✅ MEJORA: Preprocesar imagen para mejor OCR
+        const processedImage = await this.preprocessImageForOCR(item.imageData);
+        
         const worker = await Tesseract.createWorker('spa', 1);
-        const { data: { text } } = await worker.recognize(item.imageData);
+        const { data: { text } } = await worker.recognize(processedImage);
         await worker.terminate();
 
         // Buscar firma usando la misma lógica que autoSearchSignature
@@ -912,6 +916,48 @@ class SimpleAdminPDF {
         });
     }
 
+    // Preprocesar imagen para mejorar OCR: aumentar contraste y eliminar sombras
+    preprocessImageForOCR(imageData) {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                
+                // Dibujar imagen original
+                ctx.drawImage(img, 0, 0);
+                
+                // Obtener datos de píxeles
+                const imageDataObj = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageDataObj.data;
+                
+                // Aumentar contraste drásticamente y convertir a escala de grises
+                const contrastFactor = 2.5; // Factor de contraste alto
+                const brightnessOffset = -30; // Reducir brillo para eliminar fondos claros
+                
+                for (let i = 0; i < data.length; i += 4) {
+                    // Convertir a escala de grises
+                    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                    
+                    // Aplicar contraste y brillo
+                    let adjusted = ((gray - 128) * contrastFactor) + 128 + brightnessOffset;
+                    
+                    // Binarizar: si es muy claro, blanco puro; si es oscuro, negro puro
+                    adjusted = adjusted > 180 ? 255 : adjusted < 80 ? 0 : adjusted;
+                    
+                    // Asignar valor ajustado
+                    data[i] = data[i + 1] = data[i + 2] = adjusted;
+                }
+                
+                ctx.putImageData(imageDataObj, 0, 0);
+                resolve(canvas.toDataURL('image/png'));
+            };
+            img.src = imageData;
+        });
+    }
+    
     async scanImageWithOCR(imageData) {
         try {
             // Verificar que Tesseract esté cargado
@@ -921,9 +967,14 @@ class SimpleAdminPDF {
             
             // Actualizar progreso
             this.updateProgress(10, 'Imagen cargada...');
+            this.updateProgress(15, 'Mejorando contraste de imagen...');
+            
+            // ✅ MEJORA: Preprocesar imagen para mejor OCR
+            const processedImage = await this.preprocessImageForOCR(imageData);
+            
             this.updateProgress(20, 'Iniciando OCR (esto puede tardar 30-60 segundos)...');
             
-            // Realizar OCR con Tesseract.js
+            // Realizar OCR con imagen preprocesada
             const worker = await Tesseract.createWorker('spa', 1, {
                 logger: m => {
                     if (m.status === 'recognizing text') {
@@ -933,7 +984,7 @@ class SimpleAdminPDF {
                 }
             });
             
-            const { data: { text } } = await worker.recognize(imageData);
+            const { data: { text } } = await worker.recognize(processedImage);
             await worker.terminate();
             
             this.updateProgress(90, 'Texto extraído. Analizando datos...');
@@ -1596,8 +1647,8 @@ class SimpleAdminPDF {
             document.getElementById('personName').value = signature.fullName;
             document.getElementById('personDoc').value = signature.document;
             
-            // Mostrar la firma encontrada
-            this.currentSignature = signature.signature;
+            // ✅ CORRECCIÓN: Guardar el objeto completo, no solo el string
+            this.currentSignature = signature;  // Objeto completo con .signature, .fullName, etc.
             document.getElementById('foundSignature').src = signature.signature;
             document.getElementById('foundName').textContent = `${signature.fullName} - ${signature.document}`;
             document.getElementById('signatureFound').style.display = 'block';
