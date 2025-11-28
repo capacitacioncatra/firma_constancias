@@ -351,55 +351,75 @@ class SimpleAdminPDF {
 
     extractNameFromText(text) {
         const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        const totalLines = lines.length;
         
-        console.log('📄 Total líneas detectadas:', totalLines);
-        console.log('🎯 Buscando nombre en zona central del documento (40%-70%)...');
+        console.log('📄 Total líneas detectadas:', lines.length);
+        console.log('🎯 Buscando nombre después de "CONSTANCIA DE CAPACITACIÓN"...');
         
-        // Calcular zona central (donde suele estar el nombre grande)
-        const startLine = Math.floor(totalLines * 0.30); // 30% desde arriba
-        const endLine = Math.floor(totalLines * 0.70);   // 70% desde arriba
+        // ESTRATEGIA 1: Buscar la línea después de encontrar "CONSTANCIA"
+        let foundConstancia = false;
+        let skipCount = 0;
         
-        console.log(`📍 Analizando líneas ${startLine} a ${endLine} (zona central)`);
-        
-        // PRIORIDAD 1: Buscar en la zona central (30%-70%)
-        for (let i = startLine; i < endLine && i < lines.length; i++) {
+        for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             
-            // Nombre todo en MAYÚSCULAS (como en la constancia)
-            if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){1,4}$/.test(line) && 
-                line.length > 15 && line.length < 60 &&
-                !line.includes('CONSTANCIA') &&
-                !line.includes('CAPACITACIÓN') &&
-                !line.includes('CENTRO') &&
-                !line.includes('DENOMINADO')) {
-                console.log('✅ Nombre encontrado en zona central (línea', i, '):', line);
-                return line;
+            // Detectar cuando pasamos la sección de "CONSTANCIA"
+            if (line.includes('CONSTANCIA') || line.includes('CAPACITACIÓN')) {
+                foundConstancia = true;
+                skipCount = 0;
+                continue;
+            }
+            
+            // Si ya pasamos "CONSTANCIA", buscar las siguientes líneas
+            if (foundConstancia) {
+                skipCount++;
+                
+                // Saltar primeras 1-3 líneas (puede haber "A" o texto extra)
+                if (skipCount <= 3) continue;
+                
+                // Buscar nombre en MAYÚSCULAS (3-5 palabras, 20-50 caracteres)
+                if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){2,4}$/.test(line) && 
+                    line.length >= 20 && line.length <= 50 &&
+                    !line.includes('FEDERAL') &&
+                    !line.includes('TRANSPORTE') &&
+                    !line.includes('DENOMINADO') &&
+                    !line.includes('REGISTRO') &&
+                    !line.includes('FOLIO') &&
+                    !line.includes('CONTROL') &&
+                    !line.includes('EXTIENDE')) {
+                    console.log('✅ Nombre encontrado después de CONSTANCIA (línea', i, '):', line);
+                    return line;
+                }
+                
+                // Si ya avanzamos mucho, dejamos de buscar
+                if (skipCount > 15) break;
             }
         }
         
-        console.log('⚠️ No se encontró en zona central, buscando en todo el documento...');
+        console.log('⚠️ Estrategia 1 falló, intentando estrategia 2...');
         
-        // PRIORIDAD 2: Buscar en todo el documento
+        // ESTRATEGIA 2: Buscar la línea más larga en MAYÚSCULAS (suele ser el nombre)
+        let longestName = '';
+        let longestLength = 0;
+        
         for (const line of lines) {
-            // Nombre todo en MAYÚSCULAS
-            if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){1,4}$/.test(line) && 
-                line.length > 15 && line.length < 60 &&
-                !line.includes('CONSTANCIA') &&
+            if (/^[A-ZÁÉÍÓÚÑ]+(\s+[A-ZÁÉÍÓÚÑ]+){2,4}$/.test(line) && 
+                line.length >= 20 && line.length <= 50 &&
                 !line.includes('CAPACITACIÓN') &&
+                !line.includes('ADIESTRAMIENTO') &&
+                !line.includes('CONDUCTORES') &&
+                !line.includes('FEDERAL') &&
+                !line.includes('TRANSPORTE') &&
                 !line.includes('CENTRO')) {
-                console.log('✅ Nombre detectado (mayúsculas):', line);
-                return line;
+                if (line.length > longestLength) {
+                    longestLength = line.length;
+                    longestName = line;
+                }
             }
         }
         
-        // PRIORIDAD 3: Fallback - buscar patrón capitalizado normal
-        for (const line of lines) {
-            if (/^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+){1,3}$/.test(line) && 
-                line.length > 10 && line.length < 50) {
-                console.log('✅ Nombre detectado (capitalizado):', line);
-                return line;
-            }
+        if (longestName) {
+            console.log('✅ Nombre detectado (línea más larga):', longestName);
+            return longestName;
         }
         
         console.log('❌ No se pudo detectar el nombre');
@@ -494,40 +514,45 @@ class SimpleAdminPDF {
     }
     
     extractDocumentFromText(text) {
-        const lines = text.split('\n');
-        const totalLines = lines.length;
+        const lines = text.split('\n').map(l => l.trim());
         
-        console.log('🎯 Buscando CURP en zona inferior del documento (40%-80%)...');
+        console.log('🎯 Buscando CURP después de la palabra clave "CON CURP"...');
         
-        // La CURP suele estar en la mitad-inferior del documento
-        const startLine = Math.floor(totalLines * 0.40); // 40% desde arriba
-        const endLine = Math.floor(totalLines * 0.80);   // 80% desde arriba
-        const centralText = lines.slice(startLine, endLine).join('\n');
-        
-        console.log(`📍 Analizando zona: líneas ${startLine} a ${endLine}`);
-        
-        // Buscar CURP con estructura: 4 letras + 6 dígitos + H/M + 5 letras + 2 caracteres
-        // Aceptamos errores comunes del OCR (O por 0, I por 1, etc)
-        const curpRegex = /[A-Z0-9]{4}[A-Z0-9OIlSZB]{6}[HM0-9][A-Z0-9]{5}[A-Z0-9OIl]{2}/gi;
-        
-        // PRIORIDAD 1: Buscar en zona central-inferior
-        let matches = centralText.match(curpRegex);
-        
-        if (matches) {
-            for (const match of matches) {
-                if (match.length === 18) {
-                    const normalized = this.normalizeDocument(match);
-                    console.log('✅ CURP encontrado en zona inferior:', match);
-                    console.log('🔧 CURP normalizado:', normalized);
-                    return normalized;
+        // ESTRATEGIA 1: Buscar después de "CON CURP" o "CURP:"
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            
+            // Si encontramos "CON CURP" o similar
+            if (line.includes('CON CURP') || line.includes('CURP:') || line.includes('CURP :')) {
+                console.log('📍 Encontrado "CON CURP" en línea', i, ':', line);
+                
+                // La CURP puede estar en la misma línea o en las siguientes
+                // Buscar en esta línea y las próximas 3
+                for (let j = i; j < Math.min(i + 4, lines.length); j++) {
+                    const searchLine = lines[j];
+                    const curpRegex = /[A-Z0-9]{4}[A-Z0-9OIlSZB]{6}[HM0-9][A-Z0-9]{5}[A-Z0-9OIl]{2}/gi;
+                    const matches = searchLine.match(curpRegex);
+                    
+                    if (matches) {
+                        for (const match of matches) {
+                            if (match.length === 18) {
+                                const normalized = this.normalizeDocument(match);
+                                console.log('✅ CURP encontrado después de "CON CURP":', match);
+                                console.log('🔧 CURP normalizado:', normalized);
+                                return normalized;
+                            }
+                        }
+                    }
                 }
             }
         }
         
-        console.log('⚠️ No encontrado en zona inferior, buscando en todo el documento...');
+        console.log('⚠️ No encontrado después de "CON CURP", buscando en todo el documento...');
         
-        // PRIORIDAD 2: Buscar en todo el documento
-        matches = text.match(curpRegex);
+        // ESTRATEGIA 2: Buscar CURP en todo el documento
+        const curpRegex = /[A-Z0-9]{4}[A-Z0-9OIlSZB]{6}[HM0-9][A-Z0-9]{5}[A-Z0-9OIl]{2}/gi;
+        const matches = text.match(curpRegex);
+        
         if (matches) {
             for (const match of matches) {
                 if (match.length === 18) {
@@ -539,7 +564,7 @@ class SimpleAdminPDF {
             }
         }
 
-        // Si no encontró CURP, buscar RFC (13 caracteres)
+        // ESTRATEGIA 3: Buscar RFC (13 caracteres)
         const rfcRegex = /[A-Z&Ñ]{3,4}[A-Z0-9OI]{6}[A-Z0-9]{3}/gi;
         const rfcMatch = text.match(rfcRegex);
         if (rfcMatch && rfcMatch[0].length === 13) {
