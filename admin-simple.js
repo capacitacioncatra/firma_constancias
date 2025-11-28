@@ -17,6 +17,24 @@ class SimpleAdminPDF {
         this.extractedText = '';
         this.filesQueue = []; // Cola de archivos para procesar
         this.processedFiles = []; // Archivos ya procesados
+        
+        // ✅ COORDENADAS UNIFICADAS para todas las firmas (individual y por lotes)
+        // Ajusta estas coordenadas según tu plantilla de documento
+        this.COORDENADAS = {
+            usuario: {
+                x: 171,      // Posición horizontal desde la izquierda
+                y: 1150,     // Posición vertical desde abajo
+                ancho: 400,  // Ancho de la firma
+                alto: 200    // Alto de la firma
+            },
+            representante: {
+                x: 650,      // Posición horizontal desde la izquierda
+                y: 1130,     // Posición vertical desde abajo
+                ancho: 500,  // Ancho de la firma
+                alto: 200    // Alto de la firma
+            }
+        };
+        
         this.init();
     }
 
@@ -679,23 +697,19 @@ class SimpleAdminPDF {
         const userSigImage = await this.embedImage(pdfDoc, item.signature.signature);
         const repSigImage = await this.embedImage(pdfDoc, this.representantSignature);
 
-        const COORDENADAS = {
-            usuario: { x: 100, y: 150, ancho: 120, alto: 60 },
-            representante: { x: 380, y: 150, ancho: 120, alto: 60 }
-        };
-
+        // Usar coordenadas unificadas desde this.COORDENADAS
         page.drawImage(userSigImage, {
-            x: COORDENADAS.usuario.x,
-            y: pageHeight - COORDENADAS.usuario.y - COORDENADAS.usuario.alto,
-            width: COORDENADAS.usuario.ancho,
-            height: COORDENADAS.usuario.alto,
+            x: this.COORDENADAS.usuario.x,
+            y: pageHeight - this.COORDENADAS.usuario.y - this.COORDENADAS.usuario.alto,
+            width: this.COORDENADAS.usuario.ancho,
+            height: this.COORDENADAS.usuario.alto,
         });
 
         page.drawImage(repSigImage, {
-            x: COORDENADAS.representante.x,
-            y: pageHeight - COORDENADAS.representante.y - COORDENADAS.representante.alto,
-            width: COORDENADAS.representante.ancho,
-            height: COORDENADAS.representante.alto,
+            x: this.COORDENADAS.representante.x,
+            y: pageHeight - this.COORDENADAS.representante.y - this.COORDENADAS.representante.alto,
+            width: this.COORDENADAS.representante.ancho,
+            height: this.COORDENADAS.representante.alto,
         });
 
         return await pdfDoc.save();
@@ -1495,37 +1509,24 @@ class SimpleAdminPDF {
             const userSigImage = await this.embedImage(pdfDoc, this.currentSignature.signature);
             const repSigImage = await this.embedImage(pdfDoc, this.representantSignature);
 
-            // ===== COORDENADAS FIJAS =====
-            // Ajusta estas coordenadas según tu plantilla de documento
-            const COORDENADAS = {
-                usuario: {
-                    x: 171,      // Posición horizontal desde la izquierda
-                    y: 1150,      // Posición vertical desde abajo
-                    ancho: 400,  // Ancho de la firma
-                    alto: 200     // Alto de la firma
-                },
-                representante: {
-                    x: 650,      // Posición horizontal desde la izquierda
-                    y: 1130,      // Posición vertical desde abajo
-                    ancho: 500,  // Ancho de la firma
-                    alto: 200     // Alto de la firma
-                }
-            };
-
+            // ===== USAR COORDENADAS UNIFICADAS =====
+            // Las coordenadas están definidas en this.COORDENADAS (constructor)
+            // Para modificarlas, edita el constructor de la clase
+            
             // Dibujar firma del usuario
             page.drawImage(userSigImage, {
-                x: COORDENADAS.usuario.x,
-                y: pageHeight - COORDENADAS.usuario.y - COORDENADAS.usuario.alto,
-                width: COORDENADAS.usuario.ancho,
-                height: COORDENADAS.usuario.alto,
+                x: this.COORDENADAS.usuario.x,
+                y: pageHeight - this.COORDENADAS.usuario.y - this.COORDENADAS.usuario.alto,
+                width: this.COORDENADAS.usuario.ancho,
+                height: this.COORDENADAS.usuario.alto,
             });
 
             // Dibujar firma del representante
             page.drawImage(repSigImage, {
-                x: COORDENADAS.representante.x,
-                y: pageHeight - COORDENADAS.representante.y - COORDENADAS.representante.alto,
-                width: COORDENADAS.representante.ancho,
-                height: COORDENADAS.representante.alto,
+                x: this.COORDENADAS.representante.x,
+                y: pageHeight - this.COORDENADAS.representante.y - this.COORDENADAS.representante.alto,
+                width: this.COORDENADAS.representante.ancho,
+                height: this.COORDENADAS.representante.alto,
             });
 
             // Guardar el PDF final
