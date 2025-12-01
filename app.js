@@ -329,4 +329,26 @@ class SignatureForm {
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     new SignatureForm();
+    
+    // Forzar mayúsculas en campos de nombre y CURP
+    const fullNameInput = document.getElementById('fullName');
+    const documentInput = document.getElementById('document');
+    
+    if (fullNameInput) {
+        fullNameInput.addEventListener('input', function(e) {
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            this.value = this.value.toUpperCase();
+            this.setSelectionRange(start, end);
+        });
+    }
+    
+    if (documentInput) {
+        documentInput.addEventListener('input', function(e) {
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            this.value = this.value.toUpperCase();
+            this.setSelectionRange(start, end);
+        });
+    }
 });
