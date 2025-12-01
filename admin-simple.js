@@ -140,13 +140,44 @@ class SimpleAdminPDF {
 
     toggleRepConfig() {
         const config = document.getElementById('representantConfig');
-        config.style.display = config.style.display === 'none' ? 'block' : 'none';
+        const isVisible = config.style.display !== 'none';
+        
+        if (isVisible) {
+            // Cerrar
+            config.style.display = 'none';
+        } else {
+            // Abrir y limpiar formulario
+            config.style.display = 'block';
+            
+            // Limpiar preview y input
+            document.getElementById('repSignaturePreview').style.display = 'none';
+            document.getElementById('saveRepBtn').disabled = true;
+            const fileInput = document.getElementById('repSignatureFile');
+            fileInput.value = '';
+        }
     }
 
     handleRepSignatureFile(file) {
+        console.log('📁 Archivo seleccionado:', file.name, 'Tamaño:', (file.size / 1024).toFixed(2), 'KB');
+        
+        // Verificar tamaño (máximo 2MB)
+        if (file.size > 2 * 1024 * 1024) {
+            alert('⚠️ La imagen es muy grande. El tamaño máximo es 2MB.\nPor favor, reduce el tamaño de la imagen.');
+            return;
+        }
+        
         const reader = new FileReader();
         reader.onload = (e) => {
             const imgData = e.target.result;
+            
+            // Verificar tamaño de la cadena base64 (Firestore tiene límite de ~1MB)
+            const sizeInKB = (imgData.length * 3 / 4) / 1024;
+            console.log('📊 Tamaño de imagen en base64:', sizeInKB.toFixed(2), 'KB');
+            
+            if (sizeInKB > 900) {
+                alert('⚠️ La imagen codificada es muy grande para Firestore (>900KB).\nPor favor, usa una imagen más pequeña o de menor resolución.');
+                return;
+            }
             
             // Mostrar preview
             document.getElementById('repPreviewImg').src = imgData;
@@ -160,28 +191,64 @@ class SimpleAdminPDF {
     }
 
     async saveRepresentantSignature() {
-        if (this.representantSignature) {
-            try {
-                // Guardar en Firestore
-                if (CONFIG.USE_FIREBASE && db) {
-                    await db.collection('config').doc('representant_signature').set({
-                        signature: this.representantSignature,
-                        timestamp: new Date().toISOString(),
-                        updatedBy: 'admin'
-                    });
-                    console.log('✅ Firma del representante guardada en Firestore');
-                }
+        if (!this.representantSignature) {
+            alert('⚠️ No hay firma para guardar');
+            return;
+        }
+        
+        try {
+            console.log('🔄 Iniciando guardado de firma del representante...');
+            console.log('📊 CONFIG.USE_FIREBASE:', CONFIG.USE_FIREBASE);
+            console.log('📊 db disponible:', !!db);
+            
+            // Guardar en Firestore
+            if (CONFIG.USE_FIREBASE && db) {
+                console.log('📤 Guardando en Firestore...');
+                await db.collection('config').doc('representant_signature').set({
+                    signature: this.representantSignature,
+                    timestamp: new Date().toISOString(),
+                    updatedBy: 'admin'
+                });
+                console.log('✅ Firma del representante guardada en Firestore');
+            } else {
+                console.warn('⚠️ Firebase no está disponible, solo se guardará en localStorage');
+            }
+            
+            // También guardar en localStorage como respaldo
+            localStorage.setItem('representant_signature', this.representantSignature);
+            console.log('✅ Firma guardada en localStorage');
+            
+            alert('✅ Firma del representante guardada correctamente');
                 
-                // También guardar en localStorage como respaldo
-                localStorage.setItem('representant_signature', this.representantSignature);
+                // Limpiar el input de archivo para poder seleccionar de nuevo
+                const fileInput = document.getElementById('repSignatureFile');
+                fileInput.value = '';
                 
-                alert('✅ Firma del representante guardada correctamente');
+                // Ocultar preview
+                document.getElementById('repSignaturePreview').style.display = 'none';
+                document.getElementById('saveRepBtn').disabled = true;
+                
                 this.loadRepresentantSignature();
                 this.toggleRepConfig();
-            } catch (error) {
-                console.error('Error guardando firma del representante:', error);
-                alert('❌ Error al guardar la firma. Intenta de nuevo.');
+        } catch (error) {
+            console.error('❌ Error guardando firma del representante:', error);
+            console.error('Tipo de error:', error.name);
+            console.error('Mensaje de error:', error.message);
+            console.error('Stack:', error.stack);
+            
+            let errorMessage = '❌ Error al guardar la firma:\n\n';
+            
+            if (error.code === 'permission-denied') {
+                errorMessage += 'Permisos de Firestore denegados.\nVerifica las reglas de seguridad en Firebase Console.';
+            } else if (error.message.includes('quota')) {
+                errorMessage += 'Se excedió la cuota de Firestore.\nLa imagen puede ser muy grande.';
+            } else if (error.message.includes('network')) {
+                errorMessage += 'Error de conexión a internet.\nVerifica tu conexión e intenta de nuevo.';
+            } else {
+                errorMessage += error.message || 'Error desconocido';
             }
+            
+            alert(errorMessage);
         }
     }
 
