@@ -28,9 +28,6 @@
                 <a href="index.html" class="btn btn-secondary" style="display: inline-block; text-decoration: none;">
                     Captura de Firmas
                 </a>
-                <button id="configRepBtn" class="btn btn-primary">
-                    Configurar Firma del Representante
-                </button>
             </div>
         </div>
 
@@ -40,32 +37,6 @@
             <!-- Columna Izquierda -->
             <div style="display: flex; flex-direction: column; gap: 20px;">
                 
-                <!-- Configuración firma representante -->
-                <div id="representantConfig" class="config-section" style="display: none;">
-                    <div class="card">
-                        <h2>Firma del Representante Legal</h2>
-                        <div id="currentRepSignature" style="margin: 20px 0;"></div>
-                        
-                        <input type="file" id="repSignatureFile" accept="image/png,image/jpeg,image/jpg" style="display: none;">
-                        
-                        <div class="upload-area" id="repUploadArea" style="padding: 40px 20px; cursor: pointer;">
-                            <div class="upload-content">
-                                <div class="upload-icon" style="font-size: 3rem;">📄</div>
-                                <h4>Sube la imagen de la firma del representante</h4>
-                            </div>
-                        </div>
-
-                        <div id="repSignaturePreview" style="display: none; margin: 20px 0; text-align: center;">
-                            <h4>Vista Previa:</h4>
-                            <img id="repPreviewImg" style="max-width: 300px; border: 2px solid #ddd; border-radius: 8px; padding: 10px;">
-                        </div>
-
-                        <button id="saveRepBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px;" disabled>
-                            Guardar Firma del Representante
-                        </button>
-                    </div>
-                </div>
-
                 <!-- Sección de búsqueda de firmas -->
                 <div class="card">
                     <h2>Buscar Firma Registrada</h2>
@@ -98,8 +69,11 @@
                             <div class="stat-label" style="color: #64748b; margin-top: 5px;">Firma Representante</div>
                         </div>
                     </div>
-                    <button id="viewSignaturesBtn" class="btn btn-primary" style="width: 100%;">
+                    <button id="viewSignaturesBtn" class="btn btn-primary" style="width: 100%; margin-bottom: 10px;">
                         Ver Todas las Firmas Registradas
+                    </button>
+                    <button id="configRepBtn" class="btn btn-secondary" style="width: 100%;">
+                        Configurar Firma del Representante
                     </button>
                 </div>
             </div>
@@ -181,6 +155,40 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Configuración firma representante (Modal/Sección oculta) -->
+        <div id="representantConfig" class="config-section" style="display: none; margin-top: 20px;">
+            <div class="card" style="border: 2px solid #3b82f6;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h2 style="margin: 0;">Firma del Representante Legal</h2>
+                    <button onclick="document.getElementById('representantConfig').style.display='none'" 
+                            class="btn btn-secondary" style="padding: 8px 16px;">
+                        Cerrar
+                    </button>
+                </div>
+                
+                <div id="currentRepSignature" style="margin: 20px 0;"></div>
+                
+                <input type="file" id="repSignatureFile" accept="image/png,image/jpeg,image/jpg" style="display: none;">
+                
+                <div class="upload-area" id="repUploadArea" style="padding: 40px 20px; cursor: pointer;">
+                    <div class="upload-content">
+                        <div class="upload-icon" style="font-size: 3rem;">📄</div>
+                        <h4>Sube la imagen de la firma del representante</h4>
+                        <p style="color: #64748b; margin-top: 10px;">Formatos: PNG, JPG o JPEG</p>
+                    </div>
+                </div>
+
+                <div id="repSignaturePreview" style="display: none; margin: 20px 0; text-align: center;">
+                    <h4>Vista Previa:</h4>
+                    <img id="repPreviewImg" style="max-width: 300px; border: 2px solid #ddd; border-radius: 8px; padding: 10px; background: white;">
+                </div>
+
+                <button id="saveRepBtn" class="btn btn-primary" style="width: 100%; margin-top: 15px; padding: 14px; font-size: 1.05rem;" disabled>
+                    Guardar Firma del Representante
+                </button>
             </div>
         </div>
 
