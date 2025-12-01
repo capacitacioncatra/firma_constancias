@@ -22,14 +22,14 @@ class SimpleAdminPDF {
         // Ajusta estas coordenadas según tu plantilla de documento
         this.COORDENADAS = {
             usuario: {
-                x: 170,      // Posición horizontal desde la izquierda
-                y: 1000,     // Posición vertical desde abajo
+                x: 90,      // Posición horizontal desde la izquierda
+                y: 930,     // Posición vertical desde abajo
                 ancho: 400,  // Ancho de la firma
                 alto: 200    // Alto de la firma
             },
             representante: {
-                x: 600,      // Posición horizontal desde la izquierda
-                y: 1000,     // Posición vertical desde abajo
+                x: 520,      // Posición horizontal desde la izquierda
+                y: 930,     // Posición vertical desde abajo
                 ancho: 500,  // Ancho de la firma
                 alto: 200    // Alto de la firma
             }
@@ -274,14 +274,23 @@ class SimpleAdminPDF {
             this.displayFilesQueue();
 
             try {
+                console.log(`\n📋 === Procesando archivo ${i + 1}/${this.filesQueue.length}: ${item.name} ===`);
+                
                 // Procesar archivo (sin descargar)
                 await this.processSingleFileInQueue(item, false); // false = no descargar individualmente
+                
+                if (!item.signedPdfBytes) {
+                    console.error(`❌ ERROR: ${item.name} no tiene signedPdfBytes después del procesamiento`);
+                    throw new Error('No se generó el PDF firmado');
+                }
+                
+                console.log(`✅ ${item.name} procesado correctamente (${item.signedPdfBytes.length} bytes)`);
                 
                 item.status = 'completed';
                 this.processedFiles.push(item);
                 signedPdfs.push(item.signedPdfBytes); // Guardar PDF firmado
             } catch (error) {
-                console.error('Error procesando archivo:', error);
+                console.error(`❌ Error procesando archivo ${item.name}:`, error);
                 item.status = 'error';
                 item.errorMessage = error.message;
             }
@@ -699,6 +708,10 @@ class SimpleAdminPDF {
     }
 
     async signPdfForQueue(item) {
+        console.log(`🖊️ Iniciando firmado para: ${item.name}`);
+        console.log(`  - Tiene firma usuario:`, !!item.signature);
+        console.log(`  - Tiene firma representante:`, !!this.representantSignature);
+        
         const pdfDoc = await PDFLib.PDFDocument.create();
         
         let page, pageWidth, pageHeight;
@@ -718,28 +731,53 @@ class SimpleAdminPDF {
             pageHeight = backgroundImage.height;
             page = pdfDoc.addPage([pageWidth, pageHeight]);
             page.drawImage(backgroundImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+            console.log(`  ✅ Página creada: ${pageWidth}x${pageHeight}`);
         }
 
         // Embedear firmas
+        console.log(`  🖼️ Embebiendo firmas...`);
         const userSigImage = await this.embedImage(pdfDoc, item.signature.signature);
         const repSigImage = await this.embedImage(pdfDoc, this.representantSignature);
+        console.log(`  ✅ Firmas embebidas`);
 
-        // Usar coordenadas unificadas desde this.COORDENADAS
-        page.drawImage(userSigImage, {
-            x: this.COORDENADAS.usuario.x,
-            y: pageHeight - this.COORDENADAS.usuario.y - this.COORDENADAS.usuario.alto,
-            width: this.COORDENADAS.usuario.ancho,
-            height: this.COORDENADAS.usuario.alto,
-        });
+        // ✅ COORDENADAS PROPORCIONALES AL TAMAÑO DE LA IMAGEN
+        // Si la imagen es más grande que el tamaño base (ancho 1000px), escalar coordenadas
+        const BASE_WIDTH = 1000; // Ancho de referencia para las coordenadas originales
+        const scale = pageWidth / BASE_WIDTH;
+        
+        console.log(`  📐 Escala calculada: ${scale.toFixed(2)}x (página ${pageWidth}px, base ${BASE_WIDTH}px)`);
 
-        page.drawImage(repSigImage, {
-            x: this.COORDENADAS.representante.x,
-            y: pageHeight - this.COORDENADAS.representante.y - this.COORDENADAS.representante.alto,
-            width: this.COORDENADAS.representante.ancho,
-            height: this.COORDENADAS.representante.alto,
-        });
+        // Calcular posiciones proporcionales
+        const userPos = {
+            x: this.COORDENADAS.usuario.x * scale,
+            y: pageHeight - (this.COORDENADAS.usuario.y * scale) - (this.COORDENADAS.usuario.alto * scale),
+            width: this.COORDENADAS.usuario.ancho * scale,
+            height: this.COORDENADAS.usuario.alto * scale,
+        };
+        
+        const repPos = {
+            x: this.COORDENADAS.representante.x * scale,
+            y: pageHeight - (this.COORDENADAS.representante.y * scale) - (this.COORDENADAS.representante.alto * scale),
+            width: this.COORDENADAS.representante.ancho * scale,
+            height: this.COORDENADAS.representante.alto * scale,
+        };
+        
+        console.log(`  📍 Posición usuario (escalada):`, userPos);
+        console.log(`  📍 Posición representante (escalada):`, repPos);
 
-        return await pdfDoc.save();
+        // Dibujar firmas en la página
+        console.log(`  🎨 Dibujando firma usuario...`);
+        page.drawImage(userSigImage, userPos);
+        console.log(`  ✅ Firma usuario dibujada`);
+        
+        console.log(`  🎨 Dibujando firma representante...`);
+        page.drawImage(repSigImage, repPos);
+        console.log(`  ✅ Firma representante dibujada`);
+
+        const pdfBytes = await pdfDoc.save();
+        console.log(`  ✅ PDF guardado: ${pdfBytes.length} bytes`);
+        
+        return pdfBytes;
     }
 
     async showSignaturesList() {
@@ -1618,24 +1656,27 @@ class SimpleAdminPDF {
             const userSigImage = await this.embedImage(pdfDoc, this.currentSignature.signature);
             const repSigImage = await this.embedImage(pdfDoc, this.representantSignature);
 
-            // ===== USAR COORDENADAS UNIFICADAS =====
-            // Las coordenadas están definidas en this.COORDENADAS (constructor)
-            // Para modificarlas, edita el constructor de la clase
+            // ===== COORDENADAS PROPORCIONALES AL TAMAÑO DE LA IMAGEN =====
+            // Calcular escala basada en el ancho de la página
+            const BASE_WIDTH = 1000; // Ancho de referencia para las coordenadas originales
+            const scale = pageWidth / BASE_WIDTH;
+            
+            console.log(`📐 Escala individual: ${scale.toFixed(2)}x (página ${pageWidth}px)`);
             
             // Dibujar firma del usuario
             page.drawImage(userSigImage, {
-                x: this.COORDENADAS.usuario.x,
-                y: pageHeight - this.COORDENADAS.usuario.y - this.COORDENADAS.usuario.alto,
-                width: this.COORDENADAS.usuario.ancho,
-                height: this.COORDENADAS.usuario.alto,
+                x: this.COORDENADAS.usuario.x * scale,
+                y: pageHeight - (this.COORDENADAS.usuario.y * scale) - (this.COORDENADAS.usuario.alto * scale),
+                width: this.COORDENADAS.usuario.ancho * scale,
+                height: this.COORDENADAS.usuario.alto * scale,
             });
 
             // Dibujar firma del representante
             page.drawImage(repSigImage, {
-                x: this.COORDENADAS.representante.x,
-                y: pageHeight - this.COORDENADAS.representante.y - this.COORDENADAS.representante.alto,
-                width: this.COORDENADAS.representante.ancho,
-                height: this.COORDENADAS.representante.alto,
+                x: this.COORDENADAS.representante.x * scale,
+                y: pageHeight - (this.COORDENADAS.representante.y * scale) - (this.COORDENADAS.representante.alto * scale),
+                width: this.COORDENADAS.representante.ancho * scale,
+                height: this.COORDENADAS.representante.alto * scale,
             });
 
             // Guardar el PDF final
