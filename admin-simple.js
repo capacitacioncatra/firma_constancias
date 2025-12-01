@@ -28,10 +28,10 @@ class SimpleAdminPDF {
                 alto: 200    // Alto de la firma
             },
             representante: {
-                x: 520,      // Posición horizontal desde la izquierda
+                x: 500,      // Posición horizontal desde la izquierda
                 y: 930,     // Posición vertical desde abajo
                 ancho: 500,  // Ancho de la firma
-                alto: 200    // Alto de la firma
+                alto: 190    // Alto de la firma
             }
         };
         
@@ -93,6 +93,11 @@ class SimpleAdminPDF {
             this.processAllFiles();
         });
 
+        // Limpiar cola de archivos
+        document.getElementById('clearQueueBtn').addEventListener('click', () => {
+            this.clearFilesQueue();
+        });
+
         // Buscar firma
         document.getElementById('searchSignatureBtn').addEventListener('click', () => {
             this.searchSignature();
@@ -105,7 +110,12 @@ class SimpleAdminPDF {
 
         // Ver firmas registradas
         document.getElementById('viewSignaturesBtn').addEventListener('click', () => {
-            this.showSignaturesList();
+            this.showSignaturesList(false); // false = mostrar todas
+        });
+
+        // Ver firmas de hoy
+        document.getElementById('viewTodaySignaturesBtn').addEventListener('click', () => {
+            this.showSignaturesList(true); // true = solo hoy
         });
 
         // Cerrar lista de firmas
@@ -149,18 +159,60 @@ class SimpleAdminPDF {
         reader.readAsDataURL(file);
     }
 
-    saveRepresentantSignature() {
+    async saveRepresentantSignature() {
         if (this.representantSignature) {
-            localStorage.setItem('representant_signature', this.representantSignature);
-            alert('✅ Firma del representante guardada correctamente');
-            this.loadRepresentantSignature();
-            this.toggleRepConfig();
+            try {
+                // Guardar en Firestore
+                if (CONFIG.USE_FIREBASE && db) {
+                    await db.collection('config').doc('representant_signature').set({
+                        signature: this.representantSignature,
+                        timestamp: new Date().toISOString(),
+                        updatedBy: 'admin'
+                    });
+                    console.log('✅ Firma del representante guardada en Firestore');
+                }
+                
+                // También guardar en localStorage como respaldo
+                localStorage.setItem('representant_signature', this.representantSignature);
+                
+                alert('✅ Firma del representante guardada correctamente');
+                this.loadRepresentantSignature();
+                this.toggleRepConfig();
+            } catch (error) {
+                console.error('Error guardando firma del representante:', error);
+                alert('❌ Error al guardar la firma. Intenta de nuevo.');
+            }
         }
     }
 
-    loadRepresentantSignature() {
-        const saved = localStorage.getItem('representant_signature');
+    async loadRepresentantSignature() {
         const currentDiv = document.getElementById('currentRepSignature');
+        let saved = null;
+        
+        try {
+            // Intentar cargar desde Firestore primero
+            if (CONFIG.USE_FIREBASE && db) {
+                const doc = await db.collection('config').doc('representant_signature').get();
+                if (doc.exists) {
+                    saved = doc.data().signature;
+                    console.log('✅ Firma del representante cargada desde Firestore');
+                    // Guardar también en localStorage como caché
+                    localStorage.setItem('representant_signature', saved);
+                }
+            }
+            
+            // Si no hay en Firestore, intentar localStorage
+            if (!saved) {
+                saved = localStorage.getItem('representant_signature');
+                if (saved) {
+                    console.log('⚠️ Firma cargada desde localStorage (respaldo local)');
+                }
+            }
+        } catch (error) {
+            console.error('Error cargando firma del representante:', error);
+            // Fallback a localStorage
+            saved = localStorage.getItem('representant_signature');
+        }
         
         if (saved) {
             currentDiv.innerHTML = `
@@ -250,6 +302,43 @@ class SimpleAdminPDF {
             
             queueContainer.appendChild(fileCard);
         });
+    }
+
+    clearFilesQueue() {
+        if (this.filesQueue.length === 0) {
+            return;
+        }
+
+        const hasProcessed = this.filesQueue.some(f => f.status === 'completed' || f.status === 'error');
+        
+        if (hasProcessed) {
+            // Si ya hay archivos procesados, limpiar directamente
+            this.filesQueue = [];
+            this.processedFiles = [];
+            this.displayFilesQueue();
+            
+            // Ocultar la sección de cola
+            document.getElementById('filesQueueSection').style.display = 'none';
+            
+            // Limpiar el input de archivos para poder seleccionar los mismos archivos de nuevo
+            const fileInput = document.getElementById('pdfFile');
+            fileInput.value = '';
+            
+            console.log('✅ Cola de archivos limpiada');
+        } else {
+            // Si no hay archivos procesados, confirmar
+            if (confirm('¿Estás seguro de que deseas limpiar la cola?\n\nSe eliminarán todos los archivos sin procesar.')) {
+                this.filesQueue = [];
+                this.processedFiles = [];
+                this.displayFilesQueue();
+                document.getElementById('filesQueueSection').style.display = 'none';
+                
+                const fileInput = document.getElementById('pdfFile');
+                fileInput.value = '';
+                
+                console.log('✅ Cola de archivos limpiada');
+            }
+        }
     }
 
     async processAllFiles() {
@@ -780,17 +869,45 @@ class SimpleAdminPDF {
         return pdfBytes;
     }
 
-    async showSignaturesList() {
-        const signatures = await this.getAllSignatures();
+    async showSignaturesList(todayOnly = false) {
+        const allSignatures = await this.getAllSignatures();
+        let signatures = allSignatures;
+        
+        // Filtrar solo las de hoy si se solicita
+        if (todayOnly) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            
+            signatures = allSignatures.filter(sig => {
+                if (!sig.timestamp) return false;
+                const sigDate = new Date(sig.timestamp);
+                sigDate.setHours(0, 0, 0, 0);
+                return sigDate.getTime() === today.getTime();
+            });
+        }
+        
         const listContainer = document.getElementById('signaturesList');
         const noSignaturesMsg = document.getElementById('noSignaturesMessage');
         const section = document.getElementById('signaturesListSection');
 
         section.style.display = 'block';
+        
+        // Actualizar título según el filtro
+        const titleElement = section.querySelector('h3');
+        if (titleElement) {
+            const today = new Date();
+            const dateStr = today.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            titleElement.textContent = todayOnly 
+                ? `Firmas Registradas Hoy (${dateStr})` 
+                : 'Todas las Firmas Registradas';
+        }
 
         if (signatures.length === 0) {
             listContainer.style.display = 'none';
             noSignaturesMsg.style.display = 'block';
+            noSignaturesMsg.querySelector('p').textContent = todayOnly 
+                ? 'No hay firmas registradas hoy' 
+                : 'No hay firmas registradas';
             return;
         }
 
@@ -1775,10 +1892,31 @@ class SimpleAdminPDF {
 
     async updateStats() {
         const signatures = await this.getAllSignatures();
+        
+        // Total de firmas
         document.getElementById('totalSignatures').textContent = signatures.length;
         
-        const hasRep = localStorage.getItem('representant_signature');
-        document.getElementById('repSignatureStatus').textContent = hasRep ? '✅' : '❌';
+        // Firmas de hoy
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const todaySignatures = signatures.filter(sig => {
+            if (!sig.timestamp) return false;
+            const sigDate = new Date(sig.timestamp);
+            sigDate.setHours(0, 0, 0, 0);
+            return sigDate.getTime() === today.getTime();
+        });
+        
+        document.getElementById('todaySignatures').textContent = todaySignatures.length;
+        
+        // Mostrar fecha actual
+        const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        const todayFormatted = today.toLocaleDateString('es-MX', dateOptions);
+        document.getElementById('todayDate').textContent = todayFormatted;
+        
+        // Estado de firma del representante
+        const hasRep = this.representantSignature || localStorage.getItem('representant_signature');
+        document.getElementById('repSignatureStatus').textContent = hasRep ? '✓ Configurada' : '✗ Sin configurar';
     }
 
     // Funciones para Google Sheets

@@ -244,22 +244,25 @@ class SignatureForm {
 
     async saveSignature(data) {
         try {
+            // Forzar mayúsculas en nombre y documento antes de guardar
+            const dataToSave = {
+                fullName: data.fullName.toUpperCase(),
+                document: data.document.toUpperCase(),
+                signature: data.signature,
+                timestamp: data.timestamp,
+                id: data.id
+            };
+            
             if (CONFIG.USE_FIREBASE && db) {
                 // Guardar en Firebase Firestore
-                await db.collection('signatures').doc(data.id).set({
-                    fullName: data.fullName,
-                    document: data.document,
-                    signature: data.signature,
-                    timestamp: data.timestamp,
-                    id: data.id
-                });
-                console.log('✅ Firma guardada en Firebase:', data.id);
+                await db.collection('signatures').doc(dataToSave.id).set(dataToSave);
+                console.log('✅ Firma guardada en Firebase:', dataToSave.id);
             } else {
                 // localStorage para desarrollo
                 let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
-                signatures.push(data);
+                signatures.push(dataToSave);
                 localStorage.setItem('signatures', JSON.stringify(signatures));
-                console.log('Firma guardada en localStorage:', data.id);
+                console.log('Firma guardada en localStorage:', dataToSave.id);
             }
         } catch (error) {
             console.error('Error al guardar la firma:', error);
