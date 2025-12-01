@@ -1916,7 +1916,7 @@ class SimpleAdminPDF {
         
         // Estado de firma del representante
         const hasRep = this.representantSignature || localStorage.getItem('representant_signature');
-        document.getElementById('repSignatureStatus').textContent = hasRep ? '✓ Configurada' : '✗ Sin configurar';
+        document.getElementById('repSignatureStatus').textContent = hasRep ? '✓' : '✗';
     }
 
     // Funciones para Google Sheets
