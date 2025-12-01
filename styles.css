@@ -262,8 +262,7 @@ header h1 {
 
 /* Footer */
 footer {
-    background: var(--text-dark);
-    color: white;
+    color: var(--text-light);
     text-align: center;
     padding: 20px;
     margin-top: 40px;
@@ -313,17 +312,39 @@ footer {
 
 /* Admin Page Styles */
 .admin-container {
-    max-width: 1200px;
+    max-width: 1400px;
     margin: 0 auto;
     padding: 20px;
 }
 
 .card {
     background: white;
-    padding: 30px;
+    padding: 25px;
     border-radius: 12px;
-    box-shadow: var(--shadow);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
+    height: fit-content;
+}
+
+.card h2 {
+    color: #1f2937;
+    font-size: 1.4rem;
     margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid #e5e7eb;
+}
+
+.card h3 {
+    color: #374151;
+    font-size: 1.1rem;
+    margin-bottom: 15px;
+}
+
+/* Responsive grid */
+@media (max-width: 1024px) {
+    .admin-container > div[style*="grid-template-columns"] {
+        grid-template-columns: 1fr !important;
+    }
 }
 
 .config-section {
@@ -469,15 +490,19 @@ footer {
 
 .admin-header {
     background: white;
-    padding: 30px;
+    padding: 35px 30px;
     border-radius: 12px;
-    box-shadow: var(--shadow);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
     margin-bottom: 30px;
+    text-align: center;
 }
 
 .admin-header h1 {
-    color: var(--primary-color);
-    margin-bottom: 10px;
+    color: #1f2937;
+    margin-bottom: 0;
+    font-size: 1.8rem;
+    font-weight: 700;
 }
 
 .signatures-grid {
