@@ -30,8 +30,8 @@ class SimpleAdminPDF {
             representante: {
                 x: 500,      // Posición horizontal desde la izquierda
                 y: 930,     // Posición vertical desde abajo
-                ancho: 500,  // Ancho de la firma
-                alto: 190    // Alto de la firma
+                ancho: 480,  // Ancho de la firma
+                alto: 180    // Alto de la firma
             }
         };
         
@@ -200,25 +200,38 @@ class SimpleAdminPDF {
             console.log('🔄 Iniciando guardado de firma del representante...');
             console.log('📊 CONFIG.USE_FIREBASE:', CONFIG.USE_FIREBASE);
             console.log('📊 db disponible:', !!db);
+            console.log('📊 Tamaño de firma:', (this.representantSignature.length / 1024).toFixed(2), 'KB');
             
-            // Guardar en Firestore
+            let savedInFirestore = false;
+            
+            // Intentar guardar en Firestore si está disponible
             if (CONFIG.USE_FIREBASE && db) {
-                console.log('📤 Guardando en Firestore...');
-                await db.collection('config').doc('representant_signature').set({
-                    signature: this.representantSignature,
-                    timestamp: new Date().toISOString(),
-                    updatedBy: 'admin'
-                });
-                console.log('✅ Firma del representante guardada en Firestore');
+                try {
+                    console.log('📤 Guardando en Firestore...');
+                    await db.collection('config').doc('representant_signature').set({
+                        signature: this.representantSignature,
+                        timestamp: new Date().toISOString(),
+                        updatedBy: 'admin'
+                    });
+                    console.log('✅ Firma del representante guardada en Firestore');
+                    savedInFirestore = true;
+                } catch (firestoreError) {
+                    console.error('❌ Error guardando en Firestore:', firestoreError.message);
+                    console.warn('⚠️ Continuando con localStorage...');
+                }
             } else {
-                console.warn('⚠️ Firebase no está disponible, solo se guardará en localStorage');
+                console.warn('⚠️ Firebase no está disponible, usando solo localStorage');
             }
             
-            // También guardar en localStorage como respaldo
+            // Siempre guardar en localStorage (respaldo o principal)
             localStorage.setItem('representant_signature', this.representantSignature);
             console.log('✅ Firma guardada en localStorage');
             
-            alert('✅ Firma del representante guardada correctamente');
+            const message = savedInFirestore 
+                ? '✅ Firma guardada correctamente en Firebase y localStorage' 
+                : '✅ Firma guardada correctamente en localStorage (modo local)';
+            
+            alert(message);
                 
                 // Limpiar el input de archivo para poder seleccionar de nuevo
                 const fileInput = document.getElementById('repSignatureFile');
