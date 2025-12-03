@@ -10,26 +10,24 @@ if (CONFIG.USE_FIREBASE && typeof firebase !== 'undefined') {
 class SimpleAdminPDF {
     constructor() {
         this.currentPdfBytes = null;
-        this.currentPdfFile = null;
         this.currentImageData = null; // Guardar imagen original para overlay
         this.currentSignature = null;
         this.representantSignature = null;
-        this.extractedText = '';
         this.filesQueue = []; // Cola de archivos para procesar
         this.processedFiles = []; // Archivos ya procesados
         
-        // ✅ COORDENADAS UNIFICADAS para todas las firmas (individual y por lotes)
+        // COORDENADAS UNIFICADAS para todas las firmas (individual y por lotes)
         // Ajusta estas coordenadas según tu plantilla de documento
         this.COORDENADAS = {
             usuario: {
-                x: 90,      // Posición horizontal desde la izquierda
-                y: 930,     // Posición vertical desde abajo
-                ancho: 400,  // Ancho de la firma
-                alto: 200    // Alto de la firma
+                x: 50,      // Posición horizontal desde la izquierda
+                y: 960,     // Posición vertical desde abajo
+                ancho:400 ,  // Ancho de la firma
+                alto: 150    // Alto de la firma
             },
             representante: {
                 x: 500,      // Posición horizontal desde la izquierda
-                y: 930,     // Posición vertical desde abajo
+                y: 950,     // Posición vertical desde abajo
                 ancho: 480,  // Ancho de la firma
                 alto: 180    // Alto de la firma
             }
@@ -41,6 +39,9 @@ class SimpleAdminPDF {
     init() {
         // Cargar firma del representante
         this.loadRepresentantSignature();
+        
+        // Cargar lista de asistencia
+        this.loadStoredAttendanceList();
         
         // Configurar eventos
         document.getElementById('configRepBtn').addEventListener('click', () => {
@@ -132,6 +133,50 @@ class SimpleAdminPDF {
             if (e.key === 'Enter') {
                 this.searchSignatures();
             }
+        });
+
+        // Control de Asistencia - Selector de fecha
+        const datePicker = document.getElementById('attendanceDatePicker');
+        datePicker.value = new Date().toISOString().split('T')[0]; // Establecer hoy por defecto
+        
+        datePicker.addEventListener('change', () => {
+            // Si ya hay una lista cargada, recargarla con la nueva fecha
+            if (this.attendanceList && this.attendanceList.length > 0) {
+                this.selectedAttendanceDate = datePicker.value;
+                this.updateAttendanceInfo();
+            }
+        });
+
+        // Control de Asistencia - Cargar Excel
+        document.getElementById('loadAttendanceBtn').addEventListener('click', () => {
+            this.selectedAttendanceDate = datePicker.value;
+            document.getElementById('attendanceExcelFile').click();
+        });
+
+        document.getElementById('attendanceExcelFile').addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                this.loadAttendanceList(e.target.files[0]);
+            }
+        });
+
+        document.getElementById('viewAttendanceBtn').addEventListener('click', () => {
+            this.showAttendanceCheck();
+        });
+
+        document.getElementById('closeAttendanceBtn').addEventListener('click', () => {
+            document.getElementById('attendanceCheckSection').style.display = 'none';
+        });
+
+        document.getElementById('filterAllBtn').addEventListener('click', () => {
+            this.showAttendanceCheck(false);
+        });
+
+        document.getElementById('filterMissingBtn').addEventListener('click', () => {
+            this.showAttendanceCheck(true);
+        });
+
+        document.getElementById('exportMissingBtn').addEventListener('click', () => {
+            this.exportMissingAttendance();
         });
 
         // Actualizar estadísticas
@@ -364,6 +409,10 @@ class SimpleAdminPDF {
                 statusIcon = '✅';
                 statusText = 'Completado';
                 statusColor = '#10b981';
+            } else if (item.status === 'skipped') {
+                statusIcon = '⏭️';
+                statusText = 'Ya impresa';
+                statusColor = '#f59e0b';
             } else if (item.status === 'error') {
                 statusIcon = '❌';
                 statusText = 'Error';
@@ -389,7 +438,7 @@ class SimpleAdminPDF {
             return;
         }
 
-        const hasProcessed = this.filesQueue.some(f => f.status === 'completed' || f.status === 'error');
+        const hasProcessed = this.filesQueue.some(f => f.status === 'completed' || f.status === 'error' || f.status === 'skipped');
         
         if (hasProcessed) {
             // Si ya hay archivos procesados, limpiar directamente
@@ -431,8 +480,9 @@ class SimpleAdminPDF {
         btn.disabled = true;
         btn.textContent = '⏳ Procesando...';
 
-        // Array para almacenar los PDFs firmados
+        // Array para almacenar los PDFs firmados y los IDs procesados
         const signedPdfs = [];
+        const processedSignatureIds = [];
 
         for (let i = 0; i < this.filesQueue.length; i++) {
             const item = this.filesQueue[i];
@@ -458,10 +508,22 @@ class SimpleAdminPDF {
                 item.status = 'completed';
                 this.processedFiles.push(item);
                 signedPdfs.push(item.signedPdfBytes); // Guardar PDF firmado
+                
+                // Guardar ID de la firma para marcar como impresa después
+                if (item.signature && item.signature.id) {
+                    processedSignatureIds.push(item.signature.id);
+                }
             } catch (error) {
                 console.error(`❌ Error procesando archivo ${item.name}:`, error);
-                item.status = 'error';
-                item.errorMessage = error.message;
+                
+                // Si ya está impresa, marcar como "skipped" en lugar de "error"
+                if (error.message && error.message.includes('Ya impresa')) {
+                    item.status = 'skipped';
+                    item.errorMessage = 'Ya impresa - saltada';
+                } else {
+                    item.status = 'error';
+                    item.errorMessage = error.message;
+                }
             }
 
             this.displayFilesQueue();
@@ -471,6 +533,7 @@ class SimpleAdminPDF {
         btn.textContent = '⚡ Procesar Todos los Archivos';
         
         const completed = this.filesQueue.filter(f => f.status === 'completed').length;
+        const skipped = this.filesQueue.filter(f => f.status === 'skipped').length;
         const errors = this.filesQueue.filter(f => f.status === 'error').length;
         
         if (completed > 0) {
@@ -481,13 +544,20 @@ class SimpleAdminPDF {
                 const today = new Date().toISOString().split('T')[0];
                 this.downloadPdf(combinedPdf, `Constancias_Firmadas_${today}.pdf`);
                 
-                alert(`✅ Proceso completado!\n\n✓ ${completed} archivos firmados\n✓ Descargando PDF combinado\n${errors > 0 ? `\n✗ ${errors} archivos con error` : ''}`);
+                // Marcar todas las firmas procesadas como impresas
+                for (const signatureId of processedSignatureIds) {
+                    await this.markAsPrinted(signatureId);
+                }
+                
+                alert(`✅ Proceso completado!\n\n✓ ${completed} archivos firmados\n✓ ${processedSignatureIds.length} constancias marcadas como impresas\n✓ Descargando PDF combinado${skipped > 0 ? `\n⏭️ ${skipped} ya impresas (saltadas)` : ''}${errors > 0 ? `\n✗ ${errors} archivos con error` : ''}`);
             } catch (error) {
                 console.error('Error combinando PDFs:', error);
-                alert(`⚠️ Archivos procesados pero hubo un error al combinarlos.\n\n✓ ${completed} firmados\n✗ ${errors} con error`);
+                alert(`⚠️ Archivos procesados pero hubo un error al combinarlos.\n\n✓ ${completed} firmados${skipped > 0 ? `\n⏭️ ${skipped} ya impresas` : ''}\n✗ ${errors} con error`);
             }
+        } else if (skipped > 0 && completed === 0 && errors === 0) {
+            alert(`⏭️ Todas las constancias ya fueron impresas.\n\n⏭️ ${skipped} constancias saltadas\n\nSi deseas reimprimir, desmarca la casilla "Constancia Impresa" en el control de asistencia.`);
         } else {
-            alert(`❌ No se pudo procesar ningún archivo.\n\n✗ ${errors} archivos con error`);
+            alert(`❌ No se pudo procesar ningún archivo.\n\n${skipped > 0 ? `⏭️ ${skipped} ya impresas\n` : ''}✗ ${errors} archivos con error`);
         }
     }
 
@@ -620,6 +690,12 @@ class SimpleAdminPDF {
         if (!found) {
             console.error(`❌ No se encontró firma para ${item.name}`);
             throw new Error(`Firma no encontrada: ${name || doc || 'sin datos detectados'}`);
+        }
+
+        // Verificar si ya está marcada como impresa
+        if (found.printed === true) {
+            console.log(`⏭️ Saltando ${item.name} - constancia ya impresa`);
+            throw new Error(`Ya impresa - saltando: ${found.fullName}`);
         }
 
         console.log(`✅ Firma encontrada para ${item.name}:`, found.fullName);
@@ -1030,14 +1106,27 @@ class SimpleAdminPDF {
         });
     }
 
-    deleteSignature(signatureId, signatureName) {
+    async deleteSignature(signatureId, signatureName) {
         // Confirmar eliminación
         if (!confirm(`¿Estás seguro de eliminar la firma de:\n\n${signatureName}?\n\nEsta acción no se puede deshacer.`)) {
             return;
         }
 
         try {
-            // Eliminar del array de firmas
+            console.log('🗑️ Eliminando firma:', signatureId);
+            
+            // Eliminar de Firebase Firestore si está disponible
+            if (CONFIG.USE_FIREBASE && db) {
+                try {
+                    await db.collection('signatures').doc(signatureId).delete();
+                    console.log('✅ Firma eliminada de Firestore');
+                } catch (firestoreError) {
+                    console.error('❌ Error eliminando de Firestore:', firestoreError);
+                    console.warn('⚠️ Continuando con eliminación de localStorage...');
+                }
+            }
+            
+            // Eliminar de localStorage
             let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
             signatures = signatures.filter(sig => sig.id !== signatureId);
             localStorage.setItem('signatures', JSON.stringify(signatures));
@@ -1045,13 +1134,13 @@ class SimpleAdminPDF {
             // También eliminar si existe en formato antiguo
             localStorage.removeItem(`signature_${signatureId}`);
 
-            // Actualizar la interfaz
-            this.showSignaturesList();
-            this.updateStats();
+            console.log('✅ Firma eliminada de localStorage');
 
-            alert(`✅ Firma de ${signatureName} eliminada correctamente`);
+            // Actualizar la interfaz
+            await this.showSignaturesList();
+            await this.updateStats();
         } catch (error) {
-            console.error('Error al eliminar firma:', error);
+            console.error('❌ Error al eliminar firma:', error);
             alert('❌ Error al eliminar la firma. Por favor intenta de nuevo.');
         }
     }
@@ -1075,8 +1164,6 @@ class SimpleAdminPDF {
     }
     
     async processPDF(file) {
-        this.currentPdfFile = file;
-        
         try {
             this.updateProgress(5, 'Cargando archivo...');
             
@@ -1372,9 +1459,6 @@ class SimpleAdminPDF {
             
             this.updateProgress(90, 'Texto extraído. Analizando datos...');
             
-            // Guardar texto extraído
-            this.extractedText = text;
-            
             // Intentar extraer nombre y CURP automáticamente
             this.autoFillData(text);
             
@@ -1493,131 +1577,7 @@ class SimpleAdminPDF {
         }
     }
     
-    async scanPdfWithOCR(arrayBuffer) {
-        try {
-            // Verificar que las librerías estén cargadas
-            if (typeof PDFLib === 'undefined') {
-                throw new Error('PDF-Lib no se ha cargado. Por favor recarga la página.');
-            }
-            
-            if (typeof Tesseract === 'undefined') {
-                throw new Error('Tesseract.js no se ha cargado. Por favor recarga la página.');
-            }
-            
-            // Actualizar progreso
-            this.updateProgress(10, 'Cargando PDF con PDF-Lib...');
-            
-            // Cargar el PDF con pdf-lib
-            const pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
-            this.updateProgress(30, 'PDF cargado. Convirtiendo a imagen...');
-            
-            // Obtener la primera página
-            const pages = pdfDoc.getPages();
-            if (pages.length === 0) {
-                throw new Error('El PDF no tiene páginas');
-            }
-            
-            const firstPage = pages[0];
-            const { width, height } = firstPage.getSize();
-            
-            // Crear un nuevo PDF con solo la primera página para renderizar
-            const singlePagePdf = await PDFLib.PDFDocument.create();
-            const [copiedPage] = await singlePagePdf.copyPages(pdfDoc, [0]);
-            singlePagePdf.addPage(copiedPage);
-            const pdfBytes = await singlePagePdf.save();
-            
-            this.updateProgress(40, 'Convirtiendo PDF a imagen...');
-            
-            // Crear un blob y URL para el PDF
-            const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-            const url = URL.createObjectURL(blob);
-            
-            // Crear un iframe oculto para cargar el PDF
-            const iframe = document.createElement('iframe');
-            iframe.style.display = 'none';
-            document.body.appendChild(iframe);
-            
-            // Esperar a que cargue y capturar como canvas
-            await new Promise((resolve, reject) => {
-                iframe.onload = resolve;
-                iframe.onerror = reject;
-                iframe.src = url;
-            });
-            
-            // Crear canvas para OCR
-            const canvas = document.createElement('canvas');
-            const scale = 2;
-            canvas.width = width * scale;
-            canvas.height = height * scale;
-            const ctx = canvas.getContext('2d');
-            
-            // Fondo blanco
-            ctx.fillStyle = 'white';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            
-            this.updateProgress(50, 'Imagen generada. Iniciando OCR...');
-            
-            // Convertir canvas a imagen
-            const imageData = canvas.toDataURL('image/png');
-            
-            // Limpiar
-            document.body.removeChild(iframe);
-            URL.revokeObjectURL(url);
-            
-            // Realizar OCR con Tesseract.js
-            this.updateProgress(60, 'Extrayendo texto con OCR (esto puede tardar 30-60 segundos)...');
-            
-            const worker = await Tesseract.createWorker('spa', 1, {
-                logger: m => {
-                    if (m.status === 'recognizing text') {
-                        const progress = 60 + (m.progress * 30);
-                        this.updateProgress(progress, `OCR en progreso: ${Math.round(m.progress * 100)}%`);
-                    }
-                }
-            });
-            
-            const { data: { text } } = await worker.recognize(imageData);
-            await worker.terminate();
-            
-            this.updateProgress(95, 'Analizando texto extraído...');
-            
-            // Guardar texto extraído
-            this.extractedText = text;
-            
-            // Intentar extraer nombre y CURP automáticamente
-            this.autoFillData(text);
-            
-            this.updateProgress(100, '✅ Escaneo completado');
-            
-            // Mostrar sección de datos después de 1 segundo
-            setTimeout(() => {
-                document.getElementById('scanningSection').style.display = 'none';
-                document.getElementById('personDataSection').style.display = 'block';
-            }, 1000);
-            
-        } catch (error) {
-            console.error('Error en OCR:', error);
-            
-            // Mensaje de error más detallado
-            let errorMsg = '❌ Error al escanear el PDF:\n\n';
-            
-            if (error.message.includes('no se ha cargado')) {
-                errorMsg += error.message + '\n\nAsegúrate de tener conexión a Internet para cargar las librerías.';
-            } else if (error.name === 'InvalidPDFException') {
-                errorMsg += 'El archivo no es un PDF válido o está corrupto.';
-            } else {
-                errorMsg += error.message || 'Error desconocido';
-            }
-            
-            errorMsg += '\n\nPuedes ingresar los datos manualmente.';
-            
-            alert(errorMsg);
-            
-            // Mostrar sección para ingreso manual
-            document.getElementById('scanningSection').style.display = 'none';
-            document.getElementById('personDataSection').style.display = 'block';
-        }
-    }
+
 
     updateProgress(percent, message) {
         document.getElementById('scanProgress').style.width = percent + '%';
@@ -1882,6 +1842,9 @@ class SimpleAdminPDF {
             // Descargar el PDF
             this.downloadPdf(pdfBytes, this.currentSignature.fullName);
 
+            // Marcar como impresa automáticamente
+            await this.markAsPrinted(this.currentSignature.id);
+
             // Restaurar botón
             btn.disabled = false;
             btn.textContent = originalText;
@@ -1997,6 +1960,11 @@ class SimpleAdminPDF {
         // Estado de firma del representante
         const hasRep = this.representantSignature || localStorage.getItem('representant_signature');
         document.getElementById('repSignatureStatus').textContent = hasRep ? '✓' : '✗';
+        
+        // Actualizar info de asistencia si hay lista cargada
+        if (this.attendanceList && this.attendanceList.length > 0) {
+            await this.updateAttendanceInfo();
+        }
     }
 
     // Funciones para Google Sheets
@@ -2102,6 +2070,611 @@ class SimpleAdminPDF {
                 ID: ${signature.id}
             `;
             alert(details);
+        }
+    }
+
+    // ==================== CONTROL DE ASISTENCIA ====================
+    
+    async loadStoredAttendanceList() {
+        // Intentar cargar desde localStorage primero
+        const storedList = localStorage.getItem('attendanceList');
+        const storedDate = localStorage.getItem('attendanceListDate');
+        const today = new Date().toISOString().split('T')[0];
+        
+        if (storedList && storedDate === today) {
+            this.attendanceList = JSON.parse(storedList);
+            this.attendanceSheetName = localStorage.getItem('attendanceSheetName') || 'N/A';
+            this.attendanceDate = storedDate;
+            console.log(`✅ Lista de asistencia cargada desde localStorage: ${this.attendanceList.length} personas`);
+            document.getElementById('loadedSheetName').textContent = this.attendanceSheetName;
+            document.getElementById('loadedAttendanceDate').textContent = this.formatDisplayDate(storedDate);
+            await this.updateAttendanceInfo();
+            return;
+        }
+        
+        // Si no hay en localStorage o es de otro día, intentar Firestore
+        if (CONFIG.USE_FIREBASE && db) {
+            try {
+                const doc = await db.collection('attendance_lists').doc(today).get();
+                if (doc.exists) {
+                    const data = doc.data();
+                    this.attendanceList = data.list;
+                    this.attendanceSheetName = data.sheetName || 'N/A';
+                    this.attendanceDate = data.date || today;
+                    console.log(`✅ Lista de asistencia cargada desde Firestore: ${this.attendanceList.length} personas`);
+                    
+                    // Guardar en localStorage para cache
+                    localStorage.setItem('attendanceList', JSON.stringify(this.attendanceList));
+                    localStorage.setItem('attendanceListDate', this.attendanceDate);
+                    localStorage.setItem('attendanceSheetName', this.attendanceSheetName);
+                    
+                    document.getElementById('loadedSheetName').textContent = this.attendanceSheetName;
+                    document.getElementById('loadedAttendanceDate').textContent = this.formatDisplayDate(this.attendanceDate);
+                    await this.updateAttendanceInfo();
+                }
+            } catch (error) {
+                console.warn('⚠️ No se pudo cargar lista de Firestore:', error);
+            }
+        }
+    }
+    
+    async loadAttendanceList(file, sheetName = null) {
+        try {
+            console.log('📂 Cargando archivo Excel:', file.name);
+            
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    console.log('📚 Hojas disponibles:', workbook.SheetNames);
+                    
+                    // Si no se especificó una hoja, intentar detectar automáticamente
+                    let selectedSheetName = sheetName;
+                    
+                    if (!selectedSheetName) {
+                        // Usar fecha seleccionada o hoy
+                        const targetDate = this.selectedAttendanceDate || new Date().toISOString().split('T')[0];
+                        selectedSheetName = this.detectDateSheet(workbook.SheetNames, targetDate);
+                        
+                        // Si no se detectó automáticamente y hay múltiples hojas, mostrar selector
+                        if (!selectedSheetName && workbook.SheetNames.length > 1) {
+                            this.showSheetSelector(workbook, file);
+                            return;
+                        }
+                        
+                        // Si solo hay una hoja o se detectó, usarla
+                        selectedSheetName = selectedSheetName || workbook.SheetNames[0];
+                    }
+                    
+                    console.log('📋 Usando hoja:', selectedSheetName);
+                    
+                    // Leer la hoja seleccionada
+                    const sheet = workbook.Sheets[selectedSheetName];
+                    const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+                    
+                    console.log('📊 Primeras 5 filas del Excel:', jsonData.slice(0, 5));
+                    console.log('📊 Total de filas:', jsonData.length);
+                    
+                    // Extraer nombres de la columna B (índice 1)
+                    const attendanceList = [];
+                    let startRow = 0;
+                    
+                    // Buscar la fila donde empiezan los datos (después del encabezado)
+                    for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+                        const row = jsonData[i];
+                        if (row && row[1]) {
+                            const cellValue = String(row[1]).trim().toLowerCase();
+                            // Si encontramos "nombre" o similar, los datos empiezan en la siguiente fila
+                            if (cellValue === 'nombre' || cellValue === 'nombres' || cellValue === 'nombre completo') {
+                                startRow = i + 1;
+                                console.log(`📌 Encabezado encontrado en fila ${i}, datos comienzan en fila ${startRow}`);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // Si no encontramos encabezado explícito, asumimos que la primera fila son datos
+                    if (startRow === 0 && jsonData.length > 0 && jsonData[0] && jsonData[0][1]) {
+                        const firstCell = String(jsonData[0][1]).trim();
+                        // Verificar si parece un nombre (más de 5 caracteres, contiene espacios)
+                        if (firstCell.length > 5 && firstCell.includes(' ')) {
+                            startRow = 0;
+                            console.log('📌 No se encontró encabezado, asumiendo que la fila 0 son datos');
+                        } else {
+                            startRow = 1;
+                            console.log('📌 Primera fila parece encabezado, datos desde fila 1');
+                        }
+                    }
+                    
+                    // Extraer nombres desde startRow (columna B = índice 1)
+                    for (let i = startRow; i < jsonData.length; i++) {
+                        const row = jsonData[i];
+                        if (row && row[1]) {
+                            const name = String(row[1]).trim();
+                            
+                            // Validar que es un nombre válido
+                            if (name && 
+                                name.length > 2 && 
+                                name.toLowerCase() !== 'nombre' && 
+                                name.toLowerCase() !== 'nombres' &&
+                                name.toLowerCase() !== 'nombre completo' &&
+                                !name.match(/^[0-9]+$/)) { // Ignorar solo números
+                                
+                                attendanceList.push({
+                                    name: name.toUpperCase(),
+                                    normalized: this.normalizeNameForMatch(name)
+                                });
+                            }
+                        }
+                    }
+                    
+                    console.log(`✅ Nombres extraídos: ${attendanceList.length}`);
+                    if (attendanceList.length > 0) {
+                        console.log('📋 Primeros 3 nombres:', attendanceList.slice(0, 3));
+                    }
+                    
+                    if (attendanceList.length === 0) {
+                        alert('⚠️ No se encontraron nombres válidos en la hoja seleccionada.\n\nVerifica que:\n- Los nombres estén en la columna B (segunda columna)\n- Haya al menos una fila con datos\n- Los nombres tengan más de 2 caracteres');
+                        console.error('❌ Estructura del Excel:', jsonData.slice(0, 10));
+                        return;
+                    }
+                    
+                    console.log(`✅ ${attendanceList.length} nombres cargados:`, attendanceList);
+                    
+                    // Guardar en memoria
+                    const attendanceDate = this.selectedAttendanceDate || new Date().toISOString().split('T')[0];
+                    this.attendanceList = attendanceList;
+                    this.attendanceSheetName = selectedSheetName;
+                    this.attendanceDate = attendanceDate;
+                    
+                    // Guardar en Firestore
+                    if (CONFIG.USE_FIREBASE && db) {
+                        try {
+                            await db.collection('attendance_lists').doc(attendanceDate).set({
+                                list: attendanceList,
+                                sheetName: selectedSheetName,
+                                date: attendanceDate,
+                                uploadDate: new Date().toISOString(),
+                                count: attendanceList.length
+                            });
+                            console.log('✅ Lista guardada en Firestore');
+                        } catch (error) {
+                            console.warn('⚠️ No se pudo guardar en Firestore:', error);
+                        }
+                    }
+                    
+                    // Guardar en localStorage como backup
+                    localStorage.setItem('attendanceList', JSON.stringify(attendanceList));
+                    localStorage.setItem('attendanceListDate', attendanceDate);
+                    localStorage.setItem('attendanceSheetName', selectedSheetName);
+                    
+                    // Ocultar selector si estaba visible
+                    document.getElementById('sheetSelector').style.display = 'none';
+                    
+                    // Actualizar UI
+                    document.getElementById('loadedSheetName').textContent = selectedSheetName;
+                    document.getElementById('loadedAttendanceDate').textContent = this.formatDisplayDate(attendanceDate);
+                    this.updateAttendanceInfo();
+                    
+                    alert(`✅ Lista cargada correctamente\n\nFecha: ${this.formatDisplayDate(attendanceDate)}\nHoja: ${selectedSheetName}\nPersonas: ${attendanceList.length}`);
+                    
+                } catch (error) {
+                    console.error('❌ Error procesando Excel:', error);
+                    alert('❌ Error al procesar el archivo Excel.\n\nAsegúrate de que sea un archivo .xlsx o .xls válido.');
+                }
+            };
+            
+            reader.readAsArrayBuffer(file);
+            
+        } catch (error) {
+            console.error('❌ Error cargando archivo:', error);
+            alert('❌ Error al cargar el archivo. Intenta de nuevo.');
+        }
+    }
+
+    detectDateSheet(sheetNames, dateString) {
+        // dateString en formato YYYY-MM-DD
+        const today = new Date(dateString + 'T12:00:00');
+        
+        // Formatos a buscar
+        const patterns = [
+            // Formato Excel típico: "01 DE DICIEMBRE 2025", "02 DE DICIEMBRE 2025"
+            `${String(today.getDate()).padStart(2, '0')} DE ${this.getMonthName(today.getMonth()).toUpperCase()} ${today.getFullYear()}`,
+            `${today.getDate()} DE ${this.getMonthName(today.getMonth()).toUpperCase()} ${today.getFullYear()}`,
+            
+            // Formato: "01 de Diciembre 2025" (minúsculas)
+            `${String(today.getDate()).padStart(2, '0')} de ${this.getMonthName(today.getMonth())} ${today.getFullYear()}`,
+            `${today.getDate()} de ${this.getMonthName(today.getMonth())} ${today.getFullYear()}`,
+            
+            // Formato: "3 Diciembre", "03 Diciembre"
+            `${today.getDate()} ${this.getMonthName(today.getMonth())}`,
+            `${String(today.getDate()).padStart(2, '0')} ${this.getMonthName(today.getMonth())}`,
+            
+            // Formato: "Dic 3", "Dic 03"
+            `${this.getMonthShort(today.getMonth())} ${today.getDate()}`,
+            `${this.getMonthShort(today.getMonth())} ${String(today.getDate()).padStart(2, '0')}`,
+            
+            // Formato: "03-12-2025", "3-12-2025"
+            `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`,
+            `${today.getDate()}-${today.getMonth() + 1}-${today.getFullYear()}`,
+            
+            // Formato: "03/12/2025", "3/12/2025"
+            `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`,
+            `${today.getDate()}/${today.getMonth() + 1}/${today.getFullYear()}`,
+            
+            // Día de la semana: "Martes", "Mar"
+            this.getDayName(today.getDay()),
+            this.getDayShort(today.getDay()),
+            
+            // Solo el número del día
+            String(today.getDate()).padStart(2, '0'),
+            String(today.getDate())
+        ];
+        
+        console.log('🔍 Buscando hojas con estos patrones:', patterns);
+        console.log('📚 Hojas disponibles:', sheetNames);
+        
+        // Buscar coincidencia exacta primero
+        for (const pattern of patterns) {
+            for (const sheetName of sheetNames) {
+                const normalizedSheet = sheetName.toLowerCase().trim();
+                const normalizedPattern = pattern.toLowerCase();
+                
+                if (normalizedSheet === normalizedPattern) {
+                    console.log(`✅ Hoja detectada (exacta): "${sheetName}" = "${pattern}"`);
+                    return sheetName;
+                }
+            }
+        }
+        
+        // Buscar coincidencia parcial
+        for (const pattern of patterns) {
+            for (const sheetName of sheetNames) {
+                const normalizedSheet = sheetName.toLowerCase().trim();
+                const normalizedPattern = pattern.toLowerCase();
+                
+                if (normalizedSheet.includes(normalizedPattern)) {
+                    console.log(`✅ Hoja detectada (contiene): "${sheetName}" incluye "${pattern}"`);
+                    return sheetName;
+                }
+            }
+        }
+        
+        console.log('⚠️ No se detectó automáticamente la hoja del día');
+        return null;
+    }
+
+    showSheetSelector(workbook, file) {
+        const selector = document.getElementById('sheetSelector');
+        const select = document.getElementById('sheetSelect');
+        
+        // Limpiar opciones anteriores
+        select.innerHTML = '';
+        
+        // Agregar opciones
+        workbook.SheetNames.forEach(sheetName => {
+            const option = document.createElement('option');
+            option.value = sheetName;
+            option.textContent = sheetName;
+            select.appendChild(option);
+        });
+        
+        // Guardar referencia al workbook y archivo
+        this.currentWorkbook = workbook;
+        this.currentFile = file;
+        
+        // Mostrar selector
+        selector.style.display = 'block';
+        
+        // Event listener para confirmar selección (solo si no existe)
+        const confirmBtn = document.getElementById('confirmSheetBtn');
+        const newConfirmBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+        
+        newConfirmBtn.addEventListener('click', () => {
+            const selectedSheet = select.value;
+            this.loadAttendanceList(file, selectedSheet);
+        });
+    }
+
+    getMonthName(month) {
+        const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+        return months[month];
+    }
+
+    getMonthShort(month) {
+        const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
+                       'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+        return months[month];
+    }
+
+    getDayName(day) {
+        const days = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        return days[day];
+    }
+
+    getDayShort(day) {
+        const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+        return days[day];
+    }
+
+    normalizeNameForMatch(name) {
+        // Normalizar nombre para comparación (remover acentos, mayúsculas, espacios extras)
+        return name
+            .toUpperCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    async updateAttendanceInfo() {
+        if (!this.attendanceList || this.attendanceList.length === 0) {
+            document.getElementById('attendanceInfo').style.display = 'none';
+            document.getElementById('viewAttendanceBtn').style.display = 'none';
+            return;
+        }
+
+        // Obtener firmas de hoy
+        const todaySignatures = await this.getTodaySignatures();
+        
+        // Comparar con lista esperada
+        let presentCount = 0;
+        let printedCount = 0;
+        
+        for (const expected of this.attendanceList) {
+            const signature = todaySignatures.find(sig => {
+                const sigNormalized = this.normalizeNameForMatch(sig.fullName);
+                return sigNormalized === expected.normalized;
+            });
+            
+            if (signature) {
+                presentCount++;
+                if (signature.printed === true) {
+                    printedCount++;
+                }
+            }
+        }
+        
+        const missingCount = this.attendanceList.length - presentCount;
+        
+        // Actualizar UI
+        document.getElementById('attendanceTotal').textContent = this.attendanceList.length;
+        document.getElementById('attendancePresent').textContent = `${presentCount} Firmaron`;
+        document.getElementById('attendanceMissing').textContent = `${missingCount} Faltan`;
+        document.getElementById('attendancePrinted').textContent = `${printedCount} Impresas`;
+        document.getElementById('attendanceInfo').style.display = 'block';
+        document.getElementById('viewAttendanceBtn').style.display = 'block';
+    }
+
+    async getTodaySignatures() {
+        const allSignatures = await this.getAllSignatures();
+        
+        // Usar fecha de asistencia cargada o fecha del selector, o hoy por defecto
+        const targetDateString = this.attendanceDate || this.selectedAttendanceDate || new Date().toISOString().split('T')[0];
+        const targetDate = new Date(targetDateString + 'T12:00:00');
+        targetDate.setHours(0, 0, 0, 0);
+        
+        return allSignatures.filter(sig => {
+            const sigDate = new Date(sig.timestamp);
+            sigDate.setHours(0, 0, 0, 0);
+            return sigDate.getTime() === targetDate.getTime();
+        });
+    }
+
+    formatDisplayDate(dateString) {
+        // Formato: YYYY-MM-DD → "Martes, 3 de Diciembre de 2025"
+        const date = new Date(dateString + 'T12:00:00');
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        return date.toLocaleDateString('es-MX', options);
+    }
+
+    async showAttendanceCheck(onlyMissing = false) {
+        if (!this.attendanceList || this.attendanceList.length === 0) {
+            document.getElementById('noAttendanceMessage').style.display = 'block';
+            document.getElementById('attendanceTable').style.display = 'none';
+            document.getElementById('attendanceCheckSection').style.display = 'block';
+            return;
+        }
+
+        // Obtener firmas de hoy
+        const todaySignatures = await this.getTodaySignatures();
+        
+        // Crear tabla comparativa
+        const tbody = document.getElementById('attendanceTableBody');
+        tbody.innerHTML = '';
+        
+        let rowNumber = 1;
+        
+        for (const expected of this.attendanceList) {
+            // Buscar si firmó
+            const signature = todaySignatures.find(sig => {
+                const sigNormalized = this.normalizeNameForMatch(sig.fullName);
+                return sigNormalized === expected.normalized;
+            });
+            
+            const hasSignature = !!signature;
+            
+            // Filtrar si solo queremos faltantes
+            if (onlyMissing && hasSignature) continue;
+            
+            const row = document.createElement('tr');
+            row.style.borderBottom = '1px solid #e5e7eb';
+            
+            // Aplicar color de fondo según estado
+            if (hasSignature) {
+                row.style.background = '#f0fdf4';
+            } else {
+                row.style.background = '#fef2f2';
+            }
+            
+            const statusIcon = hasSignature ? '✅' : '❌';
+            const statusText = hasSignature ? 'Firmó' : 'Falta';
+            const statusColor = hasSignature ? '#10b981' : '#ef4444';
+            
+            const timeText = hasSignature 
+                ? new Date(signature.timestamp).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+                : '-';
+            
+            const curpText = hasSignature && signature.document ? signature.document : '-';
+            
+            // Verificar si está marcada como impresa
+            const isPrinted = hasSignature && signature.printed === true;
+            const printedIcon = isPrinted ? '🖨️ ✅' : (hasSignature ? '⬜' : '-');
+            const printedText = isPrinted ? 'Impresa' : (hasSignature ? 'Pendiente' : '-');
+            const printedColor = isPrinted ? '#10b981' : '#f59e0b';
+            
+            row.innerHTML = `
+                <td style="padding: 12px; text-align: left; font-weight: 500; color: #64748b;">${rowNumber}</td>
+                <td style="padding: 12px; text-align: left; font-weight: 500; color: #1f2937;">${expected.name}</td>
+                <td style="padding: 12px; text-align: center;">
+                    <span style="font-size: 1.2rem; font-weight: bold; color: ${statusColor};">
+                        ${statusIcon} ${statusText}
+                    </span>
+                </td>
+                <td style="padding: 12px; text-align: center; color: #64748b; font-weight: 500;">${timeText}</td>
+                <td style="padding: 12px; text-align: center; color: #64748b; font-size: 0.9rem;">${curpText}</td>
+                <td style="padding: 12px; text-align: center;">
+                    ${hasSignature ? `
+                        <button 
+                            onclick="adminPDF.togglePrintedStatus('${signature.id}', ${!isPrinted})"
+                            style="padding: 8px 16px; border: 2px solid ${printedColor}; background: ${isPrinted ? '#f0fdf4' : 'white'}; color: ${printedColor}; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9rem; transition: all 0.3s;"
+                            onmouseover="this.style.background='${printedColor}'; this.style.color='white';"
+                            onmouseout="this.style.background='${isPrinted ? '#f0fdf4' : 'white'}'; this.style.color='${printedColor}';"
+                        >
+                            ${printedIcon} ${printedText}
+                        </button>
+                    ` : `<span style="color: #9ca3af;">-</span>`}
+                </td>
+            `;
+            
+            rowNumber++;
+            tbody.appendChild(row);
+        }
+        
+        // Mostrar sección
+        document.getElementById('noAttendanceMessage').style.display = 'none';
+        document.getElementById('attendanceTable').style.display = 'table';
+        document.getElementById('attendanceCheckSection').style.display = 'block';
+        
+        // Scroll a la tabla
+        document.getElementById('attendanceCheckSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async exportMissingAttendance() {
+        if (!this.attendanceList || this.attendanceList.length === 0) {
+            alert('⚠️ No hay lista de asistencia cargada');
+            return;
+        }
+
+        const todaySignatures = await this.getTodaySignatures();
+        
+        // Filtrar faltantes
+        const missing = [];
+        
+        for (const expected of this.attendanceList) {
+            const found = todaySignatures.some(sig => {
+                const sigNormalized = this.normalizeNameForMatch(sig.fullName);
+                return sigNormalized === expected.normalized;
+            });
+            
+            if (!found) {
+                missing.push([expected.name]);
+            }
+        }
+        
+        if (missing.length === 0) {
+            alert('🎉 ¡Excelente! Todos han firmado.\n\nNo hay faltantes para exportar.');
+            return;
+        }
+        
+        // Crear Excel con faltantes
+        const ws = XLSX.utils.aoa_to_sheet([
+            ['Nombre Completo'],
+            ...missing
+        ]);
+        
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Faltantes');
+        
+        // Descargar
+        const today = new Date().toISOString().split('T')[0];
+        XLSX.writeFile(wb, `Faltantes_${today}.xlsx`);
+        
+        console.log(`📥 Exportados ${missing.length} faltantes`);
+        alert(`📥 Exportación completada\n\n${missing.length} personas faltantes`);
+    }
+
+    async togglePrintedStatus(signatureId, newStatus) {
+        try {
+            console.log(`🖨️ Cambiando estado de impresión: ${signatureId} → ${newStatus}`);
+            
+            // Actualizar en Firestore
+            if (CONFIG.USE_FIREBASE && db) {
+                try {
+                    await db.collection('signatures').doc(signatureId).update({
+                        printed: newStatus,
+                        printedDate: newStatus ? new Date().toISOString() : null
+                    });
+                    console.log('✅ Estado actualizado en Firestore');
+                } catch (firestoreError) {
+                    console.error('❌ Error actualizando Firestore:', firestoreError);
+                }
+            }
+            
+            // Actualizar en localStorage
+            let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+            const sigIndex = signatures.findIndex(sig => sig.id === signatureId);
+            
+            if (sigIndex !== -1) {
+                signatures[sigIndex].printed = newStatus;
+                signatures[sigIndex].printedDate = newStatus ? new Date().toISOString() : null;
+                localStorage.setItem('signatures', JSON.stringify(signatures));
+                console.log('✅ Estado actualizado en localStorage');
+            }
+            
+            // Recargar tabla de cotejo
+            await this.showAttendanceCheck();
+            
+        } catch (error) {
+            console.error('❌ Error al cambiar estado de impresión:', error);
+            alert('❌ Error al actualizar el estado. Intenta de nuevo.');
+        }
+    }
+
+    async markAsPrinted(signatureId) {
+        try {
+            console.log(`🖨️ Marcando como impresa: ${signatureId}`);
+            
+            // Actualizar en Firestore
+            if (CONFIG.USE_FIREBASE && db) {
+                try {
+                    await db.collection('signatures').doc(signatureId).update({
+                        printed: true,
+                        printedDate: new Date().toISOString()
+                    });
+                    console.log('✅ Marcada como impresa en Firestore');
+                } catch (firestoreError) {
+                    console.error('❌ Error actualizando Firestore:', firestoreError);
+                }
+            }
+            
+            // Actualizar en localStorage
+            let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+            const sigIndex = signatures.findIndex(sig => sig.id === signatureId);
+            
+            if (sigIndex !== -1) {
+                signatures[sigIndex].printed = true;
+                signatures[sigIndex].printedDate = new Date().toISOString();
+                localStorage.setItem('signatures', JSON.stringify(signatures));
+                console.log('✅ Marcada como impresa en localStorage');
+            }
+            
+        } catch (error) {
+            console.error('❌ Error al marcar como impresa:', error);
         }
     }
 }
