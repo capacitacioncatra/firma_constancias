@@ -1,9 +1,21 @@
 // Inicializar Firebase
 let db;
+console.log('🔍 Verificando Firebase...');
+console.log('CONFIG:', CONFIG);
+console.log('USE_FIREBASE:', CONFIG.USE_FIREBASE);
+console.log('firebase disponible:', typeof firebase !== 'undefined');
+
 if (CONFIG.USE_FIREBASE && typeof firebase !== 'undefined') {
-    firebase.initializeApp(CONFIG.firebase);
-    db = firebase.firestore();
-    console.log('✅ Firebase inicializado en admin');
+    try {
+        firebase.initializeApp(CONFIG.firebase);
+        db = firebase.firestore();
+        console.log('✅ Firebase inicializado correctamente en admin');
+        console.log('✅ Firestore disponible:', db);
+    } catch (error) {
+        console.error('❌ Error al inicializar Firebase:', error);
+    }
+} else {
+    console.warn('⚠️ Firebase no está disponible o USE_FIREBASE está en false');
 }
 
 // Sistema de firmado de PDFs - Modo Local (sin servidor) con OCR
@@ -15,9 +27,10 @@ class SimpleAdminPDF {
         this.representantSignature = null;
         this.filesQueue = []; // Cola de archivos para procesar
         this.processedFiles = []; // Archivos ya procesados
+        this.selectedGestor = 'TODOS'; // Filtro por gestor
+        this.constanciasMap = new Map(); // Mapa de constancias por nombre normalizado
         
         // COORDENADAS UNIFICADAS para todas las firmas (individual y por lotes)
-        // Ajusta estas coordenadas según tu plantilla de documento
         this.COORDENADAS = {
             usuario: {
                 x: 50,      // Posición horizontal desde la izquierda
@@ -37,23 +50,16 @@ class SimpleAdminPDF {
     }
 
     init() {
-        // Cargar firma del representante
         this.loadRepresentantSignature();
-        
-        // Cargar lista de asistencia
         this.loadStoredAttendanceList();
-        
-        // Configurar eventos
         document.getElementById('configRepBtn').addEventListener('click', () => {
             this.toggleRepConfig();
         });
 
-        // Upload área para firma representante
         const uploadArea = document.getElementById('repUploadArea');
         const fileInput = document.getElementById('repSignatureFile');
         
         uploadArea.addEventListener('click', () => fileInput.click());
-        
         uploadArea.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadArea.style.background = '#e0f2fe';
@@ -82,32 +88,6 @@ class SimpleAdminPDF {
             this.saveRepresentantSignature();
         });
 
-        // File upload (PDF or Image) - Ahora soporta múltiples archivos
-        document.getElementById('pdfFile').addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                this.handleMultipleFiles(e.target.files);
-            }
-        });
-
-        // Procesar todos los archivos
-        document.getElementById('processAllBtn').addEventListener('click', () => {
-            this.processAllFiles();
-        });
-
-        // Limpiar cola de archivos
-        document.getElementById('clearQueueBtn').addEventListener('click', () => {
-            this.clearFilesQueue();
-        });
-
-        // Buscar firma
-        document.getElementById('searchSignatureBtn').addEventListener('click', () => {
-            this.searchSignature();
-        });
-
-        // Firmar PDF
-        document.getElementById('signPdfBtn').addEventListener('click', () => {
-            this.signPdf();
-        });
 
         // Ver firmas registradas
         document.getElementById('viewSignaturesBtn').addEventListener('click', () => {
@@ -156,6 +136,8 @@ class SimpleAdminPDF {
         document.getElementById('attendanceExcelFile').addEventListener('change', (e) => {
             if (e.target.files[0]) {
                 this.loadAttendanceList(e.target.files[0]);
+                // Resetear el input para permitir cargar el mismo archivo de nuevo
+                e.target.value = '';
             }
         });
 
@@ -175,8 +157,26 @@ class SimpleAdminPDF {
             this.showAttendanceCheck(true);
         });
 
-        document.getElementById('exportMissingBtn').addEventListener('click', () => {
-            this.exportMissingAttendance();
+        // Cargar constancias (botón en tabla de cotejo)
+        document.getElementById('loadConstanciasBtnInline').addEventListener('click', () => {
+            console.log('🖱️ Click en loadConstanciasBtnInline');
+            const fileInput = document.getElementById('constanciasFiles');
+            fileInput.click();
+        });
+
+        document.getElementById('constanciasFiles').addEventListener('change', (e) => {
+            console.log('📝 Change event en constanciasFiles');
+            console.log('📎 Archivos seleccionados:', e.target.files.length);
+            if (e.target.files.length > 0) {
+                this.loadConstancias(Array.from(e.target.files));
+                // Resetear el input para permitir cargar los mismos archivos de nuevo
+                e.target.value = '';
+            }
+        });
+
+        // Imprimir por gestor
+        document.getElementById('printGestorBtn').addEventListener('click', () => {
+            this.printByGestor();
         });
 
         // Actualizar estadísticas
@@ -407,11 +407,11 @@ class SimpleAdminPDF {
                 statusColor = '#3b82f6';
             } else if (item.status === 'completed') {
                 statusIcon = '✅';
-                statusText = 'Completado';
+                statusText = 'Listo';
                 statusColor = '#10b981';
             } else if (item.status === 'skipped') {
                 statusIcon = '⏭️';
-                statusText = 'Ya impresa';
+                statusText = 'Impresa';
                 statusColor = '#f59e0b';
             } else if (item.status === 'error') {
                 statusIcon = '❌';
@@ -1600,16 +1600,16 @@ class SimpleAdminPDF {
         const name = this.extractNameFromText(text);
         if (name) {
             document.getElementById('personName').value = name;
-            console.log('✅ Nombre detectado:', name);
+            console.log('Nombre detectado:', name);
         } else {
-            console.log('⚠️ No se detectó nombre (no es crítico si hay CURP)');
+            console.log('No se detectó nombre (no es crítico si hay CURP)');
         }
         
         // Resumen
         if (doc) {
-            console.log('💡 Con CURP/RFC es suficiente para buscar la firma');
+            console.log('Con CURP/RFC es suficiente para buscar la firma');
         } else {
-            console.log('❌ Sin CURP/RFC no se podrá buscar automáticamente');
+            console.log('Sin CURP/RFC no se podrá buscar automáticamente');
         }
     }
 
@@ -1697,9 +1697,9 @@ class SimpleAdminPDF {
                         id: data.id
                     });
                 });
-                console.log(`✅ Total firmas obtenidas de Firebase: ${signatures.length}`);
+                console.log(`Total firmas obtenidas de Firebase: ${signatures.length}`);
             } catch (e) {
-                console.error('❌ Error obteniendo firmas de Firebase:', e);
+                console.error('Error obteniendo firmas de Firebase:', e);
             }
         } else {
             // localStorage (fallback)
@@ -2188,11 +2188,12 @@ class SimpleAdminPDF {
                         }
                     }
                     
-                    // Extraer nombres desde startRow (columna B = índice 1)
+                    // Extraer nombres desde startRow (columna B = índice 1, columna M = índice 12)
                     for (let i = startRow; i < jsonData.length; i++) {
                         const row = jsonData[i];
                         if (row && row[1]) {
                             const name = String(row[1]).trim();
+                            const gestor = row[12] ? String(row[12]).trim().toUpperCase() : 'SIN GESTOR';
                             
                             // Validar que es un nombre válido
                             if (name && 
@@ -2204,7 +2205,8 @@ class SimpleAdminPDF {
                                 
                                 attendanceList.push({
                                     name: name.toUpperCase(),
-                                    normalized: this.normalizeNameForMatch(name)
+                                    normalized: this.normalizeNameForMatch(name),
+                                    gestor: gestor
                                 });
                             }
                         }
@@ -2258,7 +2260,7 @@ class SimpleAdminPDF {
                     document.getElementById('loadedAttendanceDate').textContent = this.formatDisplayDate(attendanceDate);
                     this.updateAttendanceInfo();
                     
-                    alert(`✅ Lista cargada correctamente\n\nFecha: ${this.formatDisplayDate(attendanceDate)}\nHoja: ${selectedSheetName}\nPersonas: ${attendanceList.length}`);
+                    alert(`Lista cargada correctamente\n\nFecha: ${this.formatDisplayDate(attendanceDate)}\nHoja: ${selectedSheetName}\nPersonas: ${attendanceList.length}\n\n Usa "Ver Tabla de Cotejo" para cargar constancias y gestionar firmas`);
                     
                 } catch (error) {
                     console.error('❌ Error procesando Excel:', error);
@@ -2421,9 +2423,10 @@ class SimpleAdminPDF {
         // Obtener firmas de hoy
         const todaySignatures = await this.getTodaySignatures();
         
-        // Comparar con lista esperada
+        // Comparar con lista esperada (SIN FILTRAR - mostrar totales generales)
         let presentCount = 0;
         let printedCount = 0;
+        let constanciasCount = 0;
         
         for (const expected of this.attendanceList) {
             const signature = todaySignatures.find(sig => {
@@ -2437,17 +2440,57 @@ class SimpleAdminPDF {
                     printedCount++;
                 }
             }
+            
+            // Contar constancias cargadas
+            if (this.constanciasMap.has(expected.normalized)) {
+                constanciasCount++;
+            }
         }
         
         const missingCount = this.attendanceList.length - presentCount;
+        const constanciasMissing = this.attendanceList.length - constanciasCount;
         
-        // Actualizar UI
+        // Actualizar UI con totales generales
         document.getElementById('attendanceTotal').textContent = this.attendanceList.length;
         document.getElementById('attendancePresent').textContent = `${presentCount} Firmaron`;
         document.getElementById('attendanceMissing').textContent = `${missingCount} Faltan`;
+        document.getElementById('attendanceConstancias').textContent = `${constanciasCount}/${this.attendanceList.length} Constancias`;
         document.getElementById('attendancePrinted').textContent = `${printedCount} Impresas`;
         document.getElementById('attendanceInfo').style.display = 'block';
         document.getElementById('viewAttendanceBtn').style.display = 'block';
+    }
+
+    updateGestorFilter(gestores) {
+        const filterDiv = document.getElementById('gestorFilterTable');
+        if (!filterDiv) return;
+        
+        const select = document.getElementById('gestorSelect');
+        if (!select) return;
+        
+        // Guardar la selección actual antes de reconstruir
+        const currentSelection = this.selectedGestor || 'TODOS';
+        
+        // Limpiar opciones anteriores
+        select.innerHTML = '<option value="TODOS">TODOS LOS GESTORES</option>';
+        
+        // Agregar gestores
+        gestores.forEach(gestor => {
+            const option = document.createElement('option');
+            option.value = gestor;
+            option.textContent = gestor;
+            select.appendChild(option);
+        });
+        
+        // Restaurar selección actual
+        select.value = currentSelection;
+        
+        // Event listener para cambio de gestor
+        select.onchange = async () => {
+            this.selectedGestor = select.value;
+            console.log('📊 Gestor seleccionado:', this.selectedGestor);
+            // Recargar la tabla con el nuevo filtro
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+        };
     }
 
     async getTodaySignatures() {
@@ -2476,12 +2519,28 @@ class SimpleAdminPDF {
         if (!this.attendanceList || this.attendanceList.length === 0) {
             document.getElementById('noAttendanceMessage').style.display = 'block';
             document.getElementById('attendanceTable').style.display = 'none';
+            document.getElementById('gestorFilterTable').style.display = 'none';
             document.getElementById('attendanceCheckSection').style.display = 'block';
             return;
         }
 
+        // Guardar estado del filtro de faltantes
+        this.currentFilterOnlyMissing = onlyMissing;
+
+        // Extraer y actualizar gestores únicos
+        const gestores = [...new Set(this.attendanceList.map(item => item.gestor))].sort();
+        this.updateGestorFilter(gestores);
+        
+        // Mostrar el filtro de gestores
+        document.getElementById('gestorFilterTable').style.display = 'block';
+
         // Obtener firmas de hoy
         const todaySignatures = await this.getTodaySignatures();
+        
+        // Filtrar lista por gestor seleccionado
+        const filteredList = this.selectedGestor === 'TODOS' 
+            ? this.attendanceList 
+            : this.attendanceList.filter(item => item.gestor === this.selectedGestor);
         
         // Crear tabla comparativa
         const tbody = document.getElementById('attendanceTableBody');
@@ -2489,7 +2548,7 @@ class SimpleAdminPDF {
         
         let rowNumber = 1;
         
-        for (const expected of this.attendanceList) {
+        for (const expected of filteredList) {
             // Buscar si firmó
             const signature = todaySignatures.find(sig => {
                 const sigNormalized = this.normalizeNameForMatch(sig.fullName);
@@ -2511,7 +2570,7 @@ class SimpleAdminPDF {
                 row.style.background = '#fef2f2';
             }
             
-            const statusIcon = hasSignature ? '✅' : '❌';
+            const statusIcon = hasSignature ? '✓' : '✗';
             const statusText = hasSignature ? 'Firmó' : 'Falta';
             const statusColor = hasSignature ? '#10b981' : '#ef4444';
             
@@ -2521,17 +2580,29 @@ class SimpleAdminPDF {
             
             const curpText = hasSignature && signature.document ? signature.document : '-';
             
+            // Verificar si tiene constancia cargada
+            const hasConstancia = this.constanciasMap.has(expected.normalized);
+            const constanciaIcon = hasConstancia ? '✓' : '✗';
+            const constanciaText = hasConstancia ? 'Cargada' : 'Falta';
+            const constanciaColor = hasConstancia ? '#10b981' : '#ef4444';
+            
             // Verificar si está marcada como impresa
             const isPrinted = hasSignature && signature.printed === true;
-            const printedIcon = isPrinted ? '🖨️ ✅' : (hasSignature ? '⬜' : '-');
+            const printedIcon = isPrinted ? '✓' : (hasSignature ? '○' : '-');
             const printedText = isPrinted ? 'Impresa' : (hasSignature ? 'Pendiente' : '-');
             const printedColor = isPrinted ? '#10b981' : '#f59e0b';
             
             row.innerHTML = `
                 <td style="padding: 12px; text-align: left; font-weight: 500; color: #64748b;">${rowNumber}</td>
                 <td style="padding: 12px; text-align: left; font-weight: 500; color: #1f2937;">${expected.name}</td>
+                <td style="padding: 12px; text-align: center; color: #64748b; font-weight: 500;">${expected.gestor}</td>
                 <td style="padding: 12px; text-align: center;">
-                    <span style="font-size: 1.2rem; font-weight: bold; color: ${statusColor};">
+                    <span style="display: inline-block; padding: 4px 12px; background: ${constanciaColor}15; border: 1px solid ${constanciaColor}; border-radius: 4px; font-weight: 600; font-size: 0.85rem; color: ${constanciaColor};">
+                        ${constanciaIcon} ${constanciaText}
+                    </span>
+                </td>
+                <td style="padding: 12px; text-align: center;">
+                    <span style="display: inline-block; padding: 4px 12px; background: ${statusColor}15; border: 1px solid ${statusColor}; border-radius: 4px; font-weight: 600; font-size: 0.85rem; color: ${statusColor};">
                         ${statusIcon} ${statusText}
                     </span>
                 </td>
@@ -2562,50 +2633,6 @@ class SimpleAdminPDF {
         
         // Scroll a la tabla
         document.getElementById('attendanceCheckSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    async exportMissingAttendance() {
-        if (!this.attendanceList || this.attendanceList.length === 0) {
-            alert('⚠️ No hay lista de asistencia cargada');
-            return;
-        }
-
-        const todaySignatures = await this.getTodaySignatures();
-        
-        // Filtrar faltantes
-        const missing = [];
-        
-        for (const expected of this.attendanceList) {
-            const found = todaySignatures.some(sig => {
-                const sigNormalized = this.normalizeNameForMatch(sig.fullName);
-                return sigNormalized === expected.normalized;
-            });
-            
-            if (!found) {
-                missing.push([expected.name]);
-            }
-        }
-        
-        if (missing.length === 0) {
-            alert('🎉 ¡Excelente! Todos han firmado.\n\nNo hay faltantes para exportar.');
-            return;
-        }
-        
-        // Crear Excel con faltantes
-        const ws = XLSX.utils.aoa_to_sheet([
-            ['Nombre Completo'],
-            ...missing
-        ]);
-        
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'Faltantes');
-        
-        // Descargar
-        const today = new Date().toISOString().split('T')[0];
-        XLSX.writeFile(wb, `Faltantes_${today}.xlsx`);
-        
-        console.log(`📥 Exportados ${missing.length} faltantes`);
-        alert(`📥 Exportación completada\n\n${missing.length} personas faltantes`);
     }
 
     async togglePrintedStatus(signatureId, newStatus) {
@@ -2643,6 +2670,412 @@ class SimpleAdminPDF {
             console.error('❌ Error al cambiar estado de impresión:', error);
             alert('❌ Error al actualizar el estado. Intenta de nuevo.');
         }
+    }
+
+    async loadConstancias(files) {
+        console.log('🔍 loadConstancias llamada con files:', files);
+        
+        if (!this.attendanceList || this.attendanceList.length === 0) {
+            alert('⚠️ Primero debes cargar la lista de asistencia desde el Excel.');
+            return;
+        }
+
+        if (!files || files.length === 0) {
+            console.warn('⚠️ No se seleccionaron archivos');
+            return;
+        }
+
+        console.log(`📂 Cargando ${files.length} constancias con OCR...`);
+        
+        const loadBtn = document.getElementById('loadConstanciasBtnInline');
+        const loadBtnText = document.getElementById('loadConstanciasBtnText');
+        const progressDiv = document.getElementById('constanciasProgress');
+        const progressText = document.getElementById('constanciasProgressText');
+        const progressBar = document.getElementById('constanciasProgressBar');
+        const originalText = loadBtnText.textContent;
+        
+        loadBtn.disabled = true;
+        loadBtnText.textContent = 'Procesando...';
+        progressDiv.style.display = 'block';
+        progressBar.style.width = '0%';
+
+        let processedCount = 0;
+        let notFoundFiles = [];
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            try {
+                progressText.textContent = `Escaneando archivo ${i + 1} de ${files.length}...`;
+                progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
+                console.log(`📄 Escaneando (${i + 1}/${files.length}): ${file.name}`);
+                
+                // Escanear el archivo con OCR
+                const scannedText = await this.scanConstanciaForName(file);
+                
+                if (!scannedText) {
+                    console.warn(`⚠️ No se pudo escanear: ${file.name}`);
+                    notFoundFiles.push(file.name);
+                    continue;
+                }
+
+                console.log(`📝 Texto escaneado de ${file.name}:`, scannedText.substring(0, 200));
+                
+                // Buscar coincidencia con alumnos de la lista
+                const matchedAlumno = this.findAlumnoInText(scannedText);
+
+                if (matchedAlumno) {
+                    // Guardar el archivo en el mapa
+                    this.constanciasMap.set(matchedAlumno.normalized, file);
+                    console.log(`✅ Asociado: ${file.name} → ${matchedAlumno.name}`);
+                    processedCount++;
+                } else {
+                    console.warn(`⚠️ No se encontró alumno en: ${file.name}`);
+                    notFoundFiles.push(file.name);
+                }
+            } catch (error) {
+                console.error(`❌ Error procesando ${file.name}:`, error);
+                notFoundFiles.push(file.name);
+            }
+        }
+
+        progressDiv.style.display = 'none';
+        loadBtn.disabled = false;
+        loadBtnText.textContent = originalText;
+
+        // Actualizar contador inline en tabla de cotejo (badge en botón)
+        const inlineCounter = document.getElementById('constanciasCountInline');
+        inlineCounter.textContent = processedCount;
+        if (processedCount > 0) {
+            inlineCounter.style.display = 'inline-block';
+        } else {
+            inlineCounter.style.display = 'none';
+        }
+        
+        // Habilitar botón de imprimir si hay constancias
+        document.getElementById('printGestorBtn').disabled = processedCount === 0;
+
+        // Actualizar estadísticas
+        await this.updateAttendanceInfo();
+
+        let message = `✅ Se cargaron ${processedCount} de ${files.length} constancias.\n\n`;
+        if (notFoundFiles.length > 0) {
+            message += `⚠️ No se pudieron asociar ${notFoundFiles.length} archivos:\n`;
+            notFoundFiles.slice(0, 5).forEach(name => {
+                message += `• ${name}\n`;
+            });
+            if (notFoundFiles.length > 5) {
+                message += `... y ${notFoundFiles.length - 5} más\n`;
+            }
+        }
+        message += '\nAhora puedes ver en la tabla qué alumnos tienen su constancia cargada.';
+        
+        alert(message);
+        
+        // Recargar la tabla si está visible
+        if (document.getElementById('attendanceCheckSection').style.display !== 'none') {
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+        }
+    }
+
+    async scanConstanciaForName(file) {
+        try {
+            // Convertir archivo a imagen para OCR
+            let imageUrl;
+            
+            if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+                // Si es PDF, convertir primera página a imagen
+                const arrayBuffer = await file.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                const pdf = await loadingTask.promise;
+                const page = await pdf.getPage(1);
+                
+                const scale = 2.0;
+                const viewport = page.getViewport({ scale });
+                
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+                
+                imageUrl = canvas.toDataURL();
+            } else {
+                // Si es imagen, usar directamente
+                imageUrl = await this.fileToDataURL(file);
+            }
+
+            // Realizar OCR
+            const result = await Tesseract.recognize(
+                imageUrl,
+                'spa',
+                {
+                    logger: () => {} // Silenciar logs
+                }
+            );
+
+            return result.data.text;
+        } catch (error) {
+            console.error('Error en OCR:', error);
+            return null;
+        }
+    }
+
+    fileToDataURL(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    findAlumnoInText(text) {
+        // Normalizar el texto escaneado
+        const textNormalized = this.normalizeNameForMatch(text);
+        
+        // Buscar cada alumno en el texto
+        for (const alumno of this.attendanceList) {
+            const nombreNormalizado = alumno.normalized;
+            
+            // Dividir el nombre en palabras
+            const palabrasAlumno = nombreNormalizado.split(/\s+/).filter(w => w.length > 2);
+            
+            // Contar cuántas palabras del nombre aparecen en el texto
+            let matches = 0;
+            for (const palabra of palabrasAlumno) {
+                if (textNormalized.includes(palabra)) {
+                    matches++;
+                }
+            }
+            
+            // Si aparecen al menos 2 palabras (o todas si son menos de 3), es un match
+            const minMatches = palabrasAlumno.length >= 3 ? 2 : palabrasAlumno.length;
+            if (matches >= minMatches) {
+                console.log(`🎯 Match encontrado: ${alumno.name} (${matches}/${palabrasAlumno.length} palabras)`);
+                return alumno;
+            }
+        }
+        
+        return null;
+    }
+
+    matchNames(name1, name2) {
+        // Comparar palabras individuales para mayor flexibilidad
+        const words1 = name1.split(/\s+/).filter(w => w.length > 2);
+        const words2 = name2.split(/\s+/).filter(w => w.length > 2);
+        
+        let matches = 0;
+        for (const word1 of words1) {
+            for (const word2 of words2) {
+                if (word1.includes(word2) || word2.includes(word1)) {
+                    matches++;
+                }
+            }
+        }
+        
+        // Si coinciden al menos 2 palabras, considerar match
+        return matches >= 2;
+    }
+
+    async printByGestor() {
+        if (!this.representantSignature) {
+            alert('⚠️ Configura la firma del representante primero');
+            return;
+        }
+
+        const selectedGestor = this.selectedGestor;
+        if (selectedGestor === 'TODOS') {
+            if (!confirm('⚠️ Estás por imprimir TODAS las constancias de TODOS los gestores.\n\n¿Deseas continuar?')) {
+                return;
+            }
+        }
+
+        // Filtrar lista por gestor
+        const filteredList = selectedGestor === 'TODOS' 
+            ? this.attendanceList 
+            : this.attendanceList.filter(item => item.gestor === selectedGestor);
+        
+        // Obtener firmas
+        const todaySignatures = await this.getTodaySignatures();
+        
+        // Filtrar solo los que tienen constancia cargada Y tienen firma
+        const alumnosToProcess = [];
+        
+        for (const alumno of filteredList) {
+            const hasConstancia = this.constanciasMap.has(alumno.normalized);
+            
+            if (hasConstancia) {
+                // Buscar si tiene firma
+                const signature = todaySignatures.find(sig => {
+                    const sigNormalized = this.normalizeNameForMatch(sig.fullName);
+                    return sigNormalized === alumno.normalized;
+                });
+                
+                if (signature && !signature.printed) {
+                    alumnosToProcess.push({
+                        alumno: alumno,
+                        signature: signature,
+                        constanciaFile: this.constanciasMap.get(alumno.normalized)
+                    });
+                }
+            }
+        }
+
+        if (alumnosToProcess.length === 0) {
+            alert(`⚠️ No hay constancias listas para imprimir del gestor "${selectedGestor}".\n\nAsegúrate de que:\n• Los alumnos tengan constancia cargada\n• Los alumnos hayan firmado\n• No estén marcadas como ya impresas`);
+            return;
+        }
+
+        if (!confirm(`🖨️ Se imprimirán ${alumnosToProcess.length} constancias del gestor "${selectedGestor}".\n\n¿Deseas continuar?`)) {
+            return;
+        }
+
+        const btn = document.getElementById('printGestorBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Procesando...';
+
+        try {
+            const signedPdfs = [];
+            const processedSignatureIds = [];
+
+            for (let i = 0; i < alumnosToProcess.length; i++) {
+                const item = alumnosToProcess[i];
+                console.log(`📝 Procesando ${i + 1}/${alumnosToProcess.length}: ${item.alumno.name}`);
+
+                // Procesar constancia
+                const signedPdf = await this.processConstanciaWithSignature(
+                    item.constanciaFile,
+                    item.signature
+                );
+
+                signedPdfs.push(signedPdf);
+                processedSignatureIds.push(item.signature.id);
+            }
+
+            // Combinar todos los PDFs
+            console.log(`📁 Combinando ${signedPdfs.length} PDFs...`);
+            const combinedPdf = await this.combinePdfs(signedPdfs);
+            
+            const gestorName = selectedGestor === 'TODOS' ? 'TODOS' : selectedGestor;
+            const fileName = `Constancias_${gestorName}_${new Date().toISOString().split('T')[0]}.pdf`;
+            this.downloadPdf(combinedPdf, fileName);
+
+            // Marcar como impresas
+            for (const signatureId of processedSignatureIds) {
+                await this.markAsPrinted(signatureId);
+            }
+
+            // Actualizar estadísticas
+            await this.updateAttendanceInfo();
+
+            alert(`✅ ¡Proceso completado!\n\n✓ ${signedPdfs.length} constancias firmadas\n✓ ${processedSignatureIds.length} marcadas como impresas\n✓ PDF descargado: ${fileName}`);
+
+            // Recargar tabla
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+
+        } catch (error) {
+            console.error('❌ Error:', error);
+            alert('❌ Error al procesar constancias: ' + error.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
+    }
+
+    async processConstanciaWithSignature(file, signature) {
+        // Leer archivo
+        const arrayBuffer = await file.arrayBuffer();
+        const header = new Uint8Array(arrayBuffer.slice(0, 5));
+        const headerStr = String.fromCharCode(...header);
+
+        let imageData;
+        let pageWidth, pageHeight;
+
+        // Si es imagen, convertir a canvas
+        if (!headerStr.startsWith('%PDF')) {
+            const blob = new Blob([arrayBuffer]);
+            const imageUrl = URL.createObjectURL(blob);
+            const img = new Image();
+            
+            await new Promise((resolve, reject) => {
+                img.onload = resolve;
+                img.onerror = reject;
+                img.src = imageUrl;
+            });
+
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            imageData = canvas.toDataURL('image/png');
+            pageWidth = img.width;
+            pageHeight = img.height;
+            
+            URL.revokeObjectURL(imageUrl);
+        }
+
+        // Crear PDF firmado
+        const pdfDoc = await PDFLib.PDFDocument.create();
+        let page;
+
+        if (imageData) {
+            // Usar imagen
+            let backgroundImage;
+            if (imageData.includes('data:image/png')) {
+                const imgBytes = this.dataURLToArrayBuffer(imageData);
+                backgroundImage = await pdfDoc.embedPng(imgBytes);
+            } else {
+                const imgBytes = this.dataURLToArrayBuffer(imageData);
+                backgroundImage = await pdfDoc.embedJpg(imgBytes);
+            }
+            
+            pageWidth = backgroundImage.width;
+            pageHeight = backgroundImage.height;
+            page = pdfDoc.addPage([pageWidth, pageHeight]);
+            page.drawImage(backgroundImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+        } else {
+            // Copiar PDF existente
+            const existingPdf = await PDFLib.PDFDocument.load(arrayBuffer);
+            const pages = existingPdf.getPages();
+            pageWidth = pages[0].getWidth();
+            pageHeight = pages[0].getHeight();
+            
+            const [copiedPage] = await pdfDoc.copyPages(existingPdf, [0]);
+            pdfDoc.addPage(copiedPage);
+            page = pdfDoc.getPages()[0];
+        }
+
+        // Embedear firmas
+        const userSigImage = await this.embedImage(pdfDoc, signature.signature);
+        const repSigImage = await this.embedImage(pdfDoc, this.representantSignature);
+
+        // Calcular escala
+        const BASE_WIDTH = 1000;
+        const scale = pageWidth / BASE_WIDTH;
+
+        // Dibujar firmas
+        page.drawImage(userSigImage, {
+            x: this.COORDENADAS.usuario.x * scale,
+            y: pageHeight - (this.COORDENADAS.usuario.y * scale) - (this.COORDENADAS.usuario.alto * scale),
+            width: this.COORDENADAS.usuario.ancho * scale,
+            height: this.COORDENADAS.usuario.alto * scale,
+        });
+
+        page.drawImage(repSigImage, {
+            x: this.COORDENADAS.representante.x * scale,
+            y: pageHeight - (this.COORDENADAS.representante.y * scale) - (this.COORDENADAS.representante.alto * scale),
+            width: this.COORDENADAS.representante.ancho * scale,
+            height: this.COORDENADAS.representante.alto * scale,
+        });
+
+        return await pdfDoc.save();
     }
 
     async markAsPrinted(signatureId) {

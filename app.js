@@ -254,15 +254,47 @@ class SignatureForm {
             };
             
             if (CONFIG.USE_FIREBASE && db) {
-                // Guardar en Firebase Firestore
+                // Buscar y eliminar registros anteriores con el mismo CURP/RFC
+                console.log('🔍 Buscando registros anteriores con CURP/RFC:', dataToSave.document);
+                
+                const existingDocs = await db.collection('signatures')
+                    .where('document', '==', dataToSave.document)
+                    .get();
+                
+                if (!existingDocs.empty) {
+                    console.log(`📋 Se encontraron ${existingDocs.size} registro(s) anterior(es)`);
+                    
+                    // Eliminar todos los registros anteriores
+                    const deletePromises = [];
+                    existingDocs.forEach(doc => {
+                        console.log(`🗑️ Eliminando registro anterior: ${doc.id} (${doc.data().timestamp})`);
+                        deletePromises.push(db.collection('signatures').doc(doc.id).delete());
+                    });
+                    
+                    await Promise.all(deletePromises);
+                    console.log('✅ Registros anteriores eliminados');
+                }
+                
+                // Guardar el nuevo registro
                 await db.collection('signatures').doc(dataToSave.id).set(dataToSave);
-                console.log('✅ Firma guardada en Firebase:', dataToSave.id);
+                console.log('✅ Nueva firma guardada en Firebase:', dataToSave.id);
+                
             } else {
-                // localStorage para desarrollo
+                // localStorage para desarrollo - también eliminar duplicados
                 let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+                
+                // Filtrar registros con el mismo CURP/RFC
+                const previousCount = signatures.length;
+                signatures = signatures.filter(sig => sig.document !== dataToSave.document);
+                
+                if (signatures.length < previousCount) {
+                    console.log(`🗑️ Eliminados ${previousCount - signatures.length} registro(s) anterior(es) de localStorage`);
+                }
+                
+                // Agregar el nuevo registro
                 signatures.push(dataToSave);
                 localStorage.setItem('signatures', JSON.stringify(signatures));
-                console.log('Firma guardada en localStorage:', dataToSave.id);
+                console.log('✅ Nueva firma guardada en localStorage:', dataToSave.id);
             }
         } catch (error) {
             console.error('Error al guardar la firma:', error);
@@ -341,8 +373,20 @@ document.addEventListener('DOMContentLoaded', () => {
         fullNameInput.addEventListener('input', function(e) {
             const start = this.selectionStart;
             const end = this.selectionEnd;
-            this.value = this.value.toUpperCase();
+            // Convertir a mayúsculas y permitir solo letras y espacios
+            this.value = this.value.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑ\s]/g, '');
             this.setSelectionRange(start, end);
+        });
+        
+        // Validación al perder el foco
+        fullNameInput.addEventListener('blur', function() {
+            const value = this.value.trim();
+            if (value.length > 0 && value.length < 10) {
+                this.setCustomValidity('El nombre debe tener al menos 10 caracteres');
+                this.reportValidity();
+            } else {
+                this.setCustomValidity('');
+            }
         });
     }
     
@@ -350,8 +394,24 @@ document.addEventListener('DOMContentLoaded', () => {
         documentInput.addEventListener('input', function(e) {
             const start = this.selectionStart;
             const end = this.selectionEnd;
-            this.value = this.value.toUpperCase();
+            // Convertir a mayúsculas y permitir solo letras y números
+            this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            // Limitar a 18 caracteres
+            if (this.value.length > 18) {
+                this.value = this.value.substring(0, 18);
+            }
             this.setSelectionRange(start, end);
+        });
+        
+        // Validación al perder el foco
+        documentInput.addEventListener('blur', function() {
+            const value = this.value.trim();
+            if (value.length > 0 && value.length !== 18) {
+                this.setCustomValidity('La CURP debe tener exactamente 18 caracteres');
+                this.reportValidity();
+            } else {
+                this.setCustomValidity('');
+            }
         });
     }
 });

@@ -22,21 +22,32 @@
                     <label for="fullName">Nombre Completo *</label>
                     <input type="text" id="fullName" name="fullName" required 
                            placeholder="Ej: JUAN PEREZ GARCIA"
+                           minlength="10"
+                           pattern="[A-ZÁÉÍÓÚÑ\s]+"
+                           title="Ingrese su nombre completo (mínimo 10 caracteres, solo letras mayúsculas)"
                            style="text-transform: uppercase;">
+                    <small style="color: #64748b; font-size: 0.85rem; display: block; margin-top: 5px;">
+                        Mínimo 10 caracteres - Incluya nombre(s) y apellidos completos
+                    </small>
                 </div>
 
                 <div class="form-group">
                     <label for="document">CURP *</label>
                     <input type="text" id="document" name="document" required 
                            placeholder="Ej: ABCD123456HMCRSS09"
+                           minlength="18"
+                           maxlength="18"
+                           pattern="[A-Z]{4}[0-9]{6}[HM][A-Z]{5}[0-9A-Z]{2}"
+                           title="Ingrese su CURP completa (18 caracteres)"
                            style="text-transform: uppercase;">
+                    <small style="color: #64748b; font-size: 0.85rem; display: block; margin-top: 5px;">
+                        Debe tener exactamente 18 caracteres
+                    </small>
                 </div>
             </div>
 
             <div class="form-section">
                 <h2>Firma Digital</h2>
-                <p class="instruction">Dibuje su firma en el recuadro usando su mouse, dedo o stylus</p>
-                
                 <div class="signature-container">
                     <canvas id="signatureCanvas"></canvas>
                     <div class="canvas-placeholder" id="canvasPlaceholder">
