@@ -34,23 +34,6 @@
         <!-- Contenedor principal -->
         <div style="max-width: 1400px; margin: 0 auto; margin-top: 30px;">
             
-            <!-- Sección de búsqueda de firmas (ancho completo) -->
-            <div class="card" style="margin-bottom: 20px;">
-                <h2>Buscar Firma Registrada</h2>
-                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-                    <input type="text" id="searchInput" placeholder="Buscar por nombre o CURP..." 
-                           style="flex: 1; padding: 12px; border: 2px solid #ddd; border-radius: 8px; font-size: 1rem;">
-                    <button id="searchBtn" class="btn btn-primary" style="white-space: nowrap; width: auto; padding: 0 20px;">
-                        Buscar
-                    </button>
-                </div>
-
-                <div id="searchResults" style="display: none;">
-                    <h3 style="margin-bottom: 15px; font-size: 1.1rem;">Resultados de búsqueda:</h3>
-                    <div id="searchResultsList" style="max-height: 350px; overflow-y: auto;"></div>
-                </div>
-            </div>
-
             <!-- Fila: Control de Asistencia y Estadísticas -->
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                 
@@ -191,6 +174,52 @@
                 <button id="closeSignaturesBtn" class="btn btn-secondary">Cerrar</button>
             </div>
             
+            <!-- Filtros de búsqueda y fecha -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 15px; margin-bottom: 20px; padding: 15px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb;">
+                <!-- Búsqueda -->
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 0.9rem;">
+                        🔍 Buscar:
+                    </label>
+                    <input type="text" id="searchInput" placeholder="Nombre o CURP..." 
+                           style="width: 100%; padding: 10px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.95rem;">
+                </div>
+                
+                <!-- Filtro de fecha -->
+                <div>
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 0.9rem;">
+                        📅 Filtrar por fecha:
+                    </label>
+                    <input type="date" id="signaturesDateFilter" 
+                           style="width: 100%; padding: 10px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 0.95rem;">
+                </div>
+                
+                <!-- Botones de acción -->
+                <div style="display: flex; gap: 8px; align-items: flex-end;">
+                    <button id="searchBtn" class="btn btn-primary" style="padding: 10px 20px; white-space: nowrap;">
+                        Buscar
+                    </button>
+                    <button id="clearFiltersBtn" class="btn btn-secondary" style="padding: 10px 20px; white-space: nowrap;">
+                        Limpiar
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Contador de resultados -->
+            <div id="signaturesCounter" style="margin-bottom: 15px; padding: 10px; background: #eff6ff; border-radius: 6px; border: 1px solid #3b82f6; display: none;">
+                <span style="font-weight: 600; color: #1e40af;">Mostrando: </span>
+                <span id="signaturesCountText" style="color: #3b82f6;">0 firmas</span>
+            </div>
+            
+            <!-- Resultados de búsqueda específica -->
+            <div id="searchResults" style="display: none; margin-bottom: 20px;">
+                <h3 style="margin-bottom: 15px; font-size: 1.1rem; color: #1f2937;">Resultados de búsqueda:</h3>
+                <div id="searchResultsList" style="display: grid; gap: 15px;">
+                    <!-- Resultados de búsqueda aquí -->
+                </div>
+            </div>
+            
+            <!-- Lista completa de firmas -->
             <div id="signaturesList" style="display: grid; gap: 15px;">
                 <!-- Las firmas se cargarán aquí dinámicamente -->
             </div>

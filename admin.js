@@ -33,16 +33,16 @@ class SimpleAdminPDF {
         // COORDENADAS UNIFICADAS para todas las firmas (individual y por lotes)
         this.COORDENADAS = {
             usuario: {
-                x: 50,      // Posición horizontal desde la izquierda
+                x: 130,      // Posición horizontal desde la izquierda
                 y: 960,     // Posición vertical desde abajo
-                ancho:400 ,  // Ancho de la firma
+                ancho:250 ,  // Ancho de la firma
                 alto: 150    // Alto de la firma
             },
             representante: {
                 x: 500,      // Posición horizontal desde la izquierda
                 y: 950,     // Posición vertical desde abajo
-                ancho: 480,  // Ancho de la firma
-                alto: 180    // Alto de la firma
+                ancho: 450,  // Ancho de la firma
+                alto: 170    // Alto de la firma
             }
         };
         
@@ -91,12 +91,21 @@ class SimpleAdminPDF {
 
         // Ver firmas registradas
         document.getElementById('viewSignaturesBtn').addEventListener('click', () => {
+            // Limpiar filtros al abrir
+            document.getElementById('searchInput').value = '';
+            document.getElementById('signaturesDateFilter').value = '';
+            document.getElementById('searchResults').style.display = 'none';
             this.showSignaturesList(false); // false = mostrar todas
         });
 
         // Ver firmas de hoy
         document.getElementById('viewTodaySignaturesBtn').addEventListener('click', () => {
-            this.showSignaturesList(true); // true = solo hoy
+            // Limpiar filtros y establecer fecha de hoy
+            document.getElementById('searchInput').value = '';
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('signaturesDateFilter').value = today;
+            document.getElementById('searchResults').style.display = 'none';
+            this.showSignaturesList(false, today); // Mostrar con filtro de fecha
         });
 
         // Cerrar lista de firmas
@@ -104,15 +113,34 @@ class SimpleAdminPDF {
             document.getElementById('signaturesListSection').style.display = 'none';
         });
 
-        // Sistema de búsqueda de firmas
+        // Sistema de búsqueda de firmas en el modal
         document.getElementById('searchBtn').addEventListener('click', () => {
-            this.searchSignatures();
+            this.searchSignaturesInModal();
         });
 
         document.getElementById('searchInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                this.searchSignatures();
+                this.searchSignaturesInModal();
             }
+        });
+
+        // Filtro de fecha de firmas
+        document.getElementById('signaturesDateFilter').addEventListener('change', (e) => {
+            const selectedDate = e.target.value;
+            document.getElementById('searchResults').style.display = 'none';
+            if (selectedDate) {
+                this.showSignaturesList(false, selectedDate);
+            } else {
+                this.showSignaturesList(false);
+            }
+        });
+
+        // Limpiar filtros
+        document.getElementById('clearFiltersBtn').addEventListener('click', () => {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('signaturesDateFilter').value = '';
+            document.getElementById('searchResults').style.display = 'none';
+            this.showSignaturesList(false);
         });
 
         // Control de Asistencia - Selector de fecha
@@ -1025,19 +1053,27 @@ class SimpleAdminPDF {
         return pdfBytes;
     }
 
-    async showSignaturesList(todayOnly = false) {
+    async showSignaturesList(todayOnly = false, filterDate = null) {
         const allSignatures = await this.getAllSignatures();
         let signatures = allSignatures;
         
-        // Filtrar solo las de hoy si se solicita
-        if (todayOnly) {
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
+        // Filtrar por fecha específica si se proporciona
+        if (filterDate) {
+            const targetDate = this.getLocalDateFromString(filterDate);
             
             signatures = allSignatures.filter(sig => {
                 if (!sig.timestamp) return false;
-                const sigDate = new Date(sig.timestamp);
-                sigDate.setHours(0, 0, 0, 0);
+                const sigDate = this.getDateWithoutTime(sig.timestamp);
+                return sigDate.getTime() === targetDate.getTime();
+            });
+        }
+        // Filtrar solo las de hoy si se solicita
+        else if (todayOnly) {
+            const today = this.getDateWithoutTime(new Date());
+            
+            signatures = allSignatures.filter(sig => {
+                if (!sig.timestamp) return false;
+                const sigDate = this.getDateWithoutTime(sig.timestamp);
                 return sigDate.getTime() === today.getTime();
             });
         }
@@ -1045,25 +1081,44 @@ class SimpleAdminPDF {
         const listContainer = document.getElementById('signaturesList');
         const noSignaturesMsg = document.getElementById('noSignaturesMessage');
         const section = document.getElementById('signaturesListSection');
+        const counter = document.getElementById('signaturesCounter');
+        const counterText = document.getElementById('signaturesCountText');
 
         section.style.display = 'block';
         
         // Actualizar título según el filtro
         const titleElement = section.querySelector('h3');
         if (titleElement) {
-            const today = new Date();
-            const dateStr = today.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-            titleElement.textContent = todayOnly 
-                ? `Firmas Registradas Hoy (${dateStr})` 
-                : 'Todas las Firmas Registradas';
+            if (filterDate) {
+                const dateObj = new Date(filterDate);
+                const dateStr = dateObj.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                titleElement.textContent = `Firmas del ${dateStr}`;
+            } else {
+                const today = new Date();
+                const dateStr = today.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+                titleElement.textContent = todayOnly 
+                    ? `Firmas Registradas Hoy (${dateStr})` 
+                    : 'Todas las Firmas Registradas';
+            }
+        }
+
+        // Mostrar contador
+        if (signatures.length > 0) {
+            counter.style.display = 'block';
+            counterText.textContent = `${signatures.length} firma${signatures.length !== 1 ? 's' : ''}`;
+        } else {
+            counter.style.display = 'none';
         }
 
         if (signatures.length === 0) {
             listContainer.style.display = 'none';
             noSignaturesMsg.style.display = 'block';
-            noSignaturesMsg.querySelector('p').textContent = todayOnly 
-                ? 'No hay firmas registradas hoy' 
-                : 'No hay firmas registradas';
+            const msgText = noSignaturesMsg.querySelector('p:first-child');
+            if (filterDate) {
+                msgText.textContent = 'No hay firmas para esta fecha';
+            } else {
+                msgText.textContent = todayOnly ? 'No hay firmas registradas hoy' : 'No hay firmas registradas';
+            }
             return;
         }
 
@@ -1940,13 +1995,11 @@ class SimpleAdminPDF {
         document.getElementById('totalSignatures').textContent = signatures.length;
         
         // Firmas de hoy
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const today = this.getDateWithoutTime(new Date());
         
         const todaySignatures = signatures.filter(sig => {
             if (!sig.timestamp) return false;
-            const sigDate = new Date(sig.timestamp);
-            sigDate.setHours(0, 0, 0, 0);
+            const sigDate = this.getDateWithoutTime(sig.timestamp);
             return sigDate.getTime() === today.getTime();
         });
         
@@ -1968,8 +2021,9 @@ class SimpleAdminPDF {
     }
 
     // Funciones para Google Sheets
-    async searchSignatures() {
+    async searchSignaturesInModal() {
         const searchTerm = document.getElementById('searchInput').value.trim();
+        const dateFilter = document.getElementById('signaturesDateFilter').value;
         
         if (!searchTerm || searchTerm.length < 3) {
             alert('⚠️ Ingresa al menos 3 caracteres para buscar');
@@ -1977,60 +2031,101 @@ class SimpleAdminPDF {
         }
 
         const searchBtn = document.getElementById('searchBtn');
+        const originalText = searchBtn.textContent;
         searchBtn.disabled = true;
-        searchBtn.textContent = '⏳ Buscando...';
+        searchBtn.textContent = 'Buscando...';
 
         try {
-            // Buscar en firmas (localStorage o Firebase)
-            const signatures = await this.getAllSignatures();
+            // Obtener firmas con filtro de fecha si aplica
+            let signatures = await this.getAllSignatures();
+            
+            // Aplicar filtro de fecha si existe
+            if (dateFilter) {
+                const targetDate = this.getLocalDateFromString(dateFilter);
+                
+                signatures = signatures.filter(sig => {
+                    if (!sig.timestamp) return false;
+                    const sigDate = this.getDateWithoutTime(sig.timestamp);
+                    return sigDate.getTime() === targetDate.getTime();
+                });
+            }
+            
+            // Buscar por nombre o CURP
             const searchLower = searchTerm.toLowerCase();
             const results = signatures.filter(sig => 
                 sig.fullName.toLowerCase().includes(searchLower) ||
                 sig.document.toLowerCase().includes(searchLower)
             );
 
-            this.displaySearchResults(results);
+            this.displaySearchResultsInModal(results);
 
         } catch (error) {
             console.error('Error en búsqueda:', error);
             alert('❌ Error al buscar firmas');
         } finally {
             searchBtn.disabled = false;
-            searchBtn.textContent = '🔍 Buscar';
+            searchBtn.textContent = originalText;
         }
     }
 
-    displaySearchResults(results) {
+    displaySearchResultsInModal(results) {
         const resultsSection = document.getElementById('searchResults');
         const resultsList = document.getElementById('searchResultsList');
+        const mainList = document.getElementById('signaturesList');
+        const counter = document.getElementById('signaturesCounter');
+        const counterText = document.getElementById('signaturesCountText');
+
+        // Ocultar lista principal y mostrar resultados
+        mainList.style.display = 'none';
+        resultsSection.style.display = 'block';
+        
+        // Actualizar contador
+        counter.style.display = 'block';
+        counterText.textContent = `${results.length} resultado${results.length !== 1 ? 's' : ''} de búsqueda`;
 
         if (results.length === 0) {
             resultsList.innerHTML = `
-                <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 8px; padding: 20px; text-align: center;">
-                    <h3 style="color: #dc2626;">❌ Sin resultados</h3>
-                    <p>No se encontraron firmas con ese criterio de búsqueda.</p>
+                <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 8px; padding: 30px; text-align: center; grid-column: 1 / -1;">
+                    <h3 style="color: #dc2626; margin: 0 0 10px 0;">❌ Sin resultados</h3>
+                    <p style="color: #991b1b; margin: 0;">No se encontraron firmas con ese criterio de búsqueda.</p>
                 </div>
             `;
         } else {
-            resultsList.innerHTML = results.map(sig => `
-                <div style="background: white; border: 2px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-bottom: 10px; display: flex; align-items: center; gap: 15px;">
-                    <img src="${sig.signature}" style="width: 120px; height: 60px; object-fit: contain; border: 1px solid #ddd; border-radius: 4px;">
-                    <div style="flex: 1;">
-                        <p style="margin: 0; font-weight: bold;">${sig.fullName}</p>
-                        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9rem;">${sig.document}</p>
-                        <p style="margin: 5px 0 0 0; color: #999; font-size: 0.85rem;">${new Date(sig.timestamp).toLocaleString('es-MX')}</p>
+            // Limpiar lista
+            resultsList.innerHTML = '';
+            
+            // Crear tarjetas igual que en showSignaturesList
+            results.forEach(sig => {
+                const card = document.createElement('div');
+                card.style.cssText = 'border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; background: white; display: grid; grid-template-columns: auto 1fr auto; gap: 15px; align-items: center;';
+                
+                card.innerHTML = `
+                    <div style="width: 150px; height: 80px; border: 2px solid #ddd; border-radius: 4px; padding: 5px; background: white; display: flex; align-items: center; justify-content: center;">
+                        <img src="${sig.signature}" style="max-width: 100%; max-height: 100%; object-fit: contain;">
                     </div>
-                    <button onclick="adminPDF.selectSignatureForSigning('${sig.id}')" class="btn btn-primary" style="white-space: nowrap;">
-                        ✓ Usar esta firma
+                    <div>
+                        <h4 style="margin: 0 0 8px 0; color: #1f2937;">${sig.fullName}</h4>
+                        <p style="margin: 0; color: #6b7280; font-size: 0.9rem;">
+                            <strong>CURP/RFC:</strong> ${sig.document}
+                        </p>
+                        <p style="margin: 5px 0 0 0; color: #9ca3af; font-size: 0.85rem;">
+                            📅 ${new Date(sig.timestamp).toLocaleString('es-MX')}
+                        </p>
+                    </div>
+                    <button class="btn-delete-signature" data-id="${sig.id}" data-name="${sig.fullName}" style="background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s;">
+                        🗑️ Eliminar
                     </button>
-                    <button onclick="adminPDF.viewSignatureDetails('${sig.id}')" class="btn btn-secondary" style="white-space: nowrap;">
-                        👁️ Ver detalles
-                    </button>
-                </div>
-            `).join('');
+                `;
+                
+                // Agregar evento de eliminación
+                const deleteBtn = card.querySelector('.btn-delete-signature');
+                deleteBtn.addEventListener('mouseover', () => deleteBtn.style.background = '#dc2626');
+                deleteBtn.addEventListener('mouseout', () => deleteBtn.style.background = '#ef4444');
+                deleteBtn.addEventListener('click', () => this.deleteSignature(sig.id, sig.fullName));
+                
+                resultsList.appendChild(card);
+            });
         }
-
-        resultsSection.style.display = 'block';
     }
 
     async selectSignatureForSigning(signatureId) {
@@ -2403,12 +2498,30 @@ class SimpleAdminPDF {
         return days[day];
     }
 
+    // Helper para crear fecha local desde string YYYY-MM-DD sin problemas de zona horaria
+    getLocalDateFromString(dateString) {
+        // Dividir el string "YYYY-MM-DD"
+        const [year, month, day] = dateString.split('-').map(Number);
+        // Crear fecha local (mes es 0-indexed en JavaScript)
+        const date = new Date(year, month - 1, day);
+        date.setHours(0, 0, 0, 0);
+        return date;
+    }
+
+    // Helper para obtener fecha sin hora de un timestamp
+    getDateWithoutTime(timestamp) {
+        const date = new Date(timestamp);
+        date.setHours(0, 0, 0, 0);
+        return date;
+    }
+
     normalizeNameForMatch(name) {
         // Normalizar nombre para comparación (remover acentos, mayúsculas, espacios extras)
         return name
             .toUpperCase()
             .normalize("NFD")
             .replace(/[\u0300-\u036f]/g, "")
+            .replace(/Ñ/g, 'N')  // Convertir Ñ a N para matching
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -2498,19 +2611,17 @@ class SimpleAdminPDF {
         
         // Usar fecha de asistencia cargada o fecha del selector, o hoy por defecto
         const targetDateString = this.attendanceDate || this.selectedAttendanceDate || new Date().toISOString().split('T')[0];
-        const targetDate = new Date(targetDateString + 'T12:00:00');
-        targetDate.setHours(0, 0, 0, 0);
+        const targetDate = this.getLocalDateFromString(targetDateString);
         
         return allSignatures.filter(sig => {
-            const sigDate = new Date(sig.timestamp);
-            sigDate.setHours(0, 0, 0, 0);
+            const sigDate = this.getDateWithoutTime(sig.timestamp);
             return sigDate.getTime() === targetDate.getTime();
         });
     }
 
     formatDisplayDate(dateString) {
         // Formato: YYYY-MM-DD → "Martes, 3 de Diciembre de 2025"
-        const date = new Date(dateString + 'T12:00:00');
+        const date = this.getLocalDateFromString(dateString);
         const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
         return date.toLocaleDateString('es-MX', options);
     }
@@ -2835,32 +2946,154 @@ class SimpleAdminPDF {
 
     findAlumnoInText(text) {
         // Normalizar el texto escaneado
-        const textNormalized = this.normalizeNameForMatch(text);
+        let textNormalized = this.normalizeNameForMatch(text);
+        
+        // Limpiar espacios múltiples que pueden venir del OCR (ej: "MU   OZ" -> "MUOZ")
+        // Esto ayuda cuando el OCR no reconoce caracteres especiales como Ñ
+        textNormalized = textNormalized.replace(/\s{2,}/g, '');
+        
+        let bestMatch = null;
+        let bestScore = 0;
+        const MIN_SCORE = 0.65; // Reducido a 65% para compensar errores de OCR
         
         // Buscar cada alumno en el texto
         for (const alumno of this.attendanceList) {
             const nombreNormalizado = alumno.normalized;
-            
-            // Dividir el nombre en palabras
             const palabrasAlumno = nombreNormalizado.split(/\s+/).filter(w => w.length > 2);
             
-            // Contar cuántas palabras del nombre aparecen en el texto
-            let matches = 0;
-            for (const palabra of palabrasAlumno) {
-                if (textNormalized.includes(palabra)) {
-                    matches++;
+            let score = 0;
+            let matchedWords = 0;
+            let totalWeight = 0;
+            let lastNameBonus = 0;
+            
+            // Calcular score ponderado
+            for (let i = 0; i < palabrasAlumno.length; i++) {
+                const palabra = palabrasAlumno[i];
+                // Palabras más largas tienen más peso (típicamente apellidos)
+                let weight = Math.max(1, palabra.length / 4);
+                
+                // IMPORTANTE: Si es el segundo apellido (típicamente última palabra), darle peso extra
+                // Esto ayuda a confirmar identidad cuando el primer apellido tiene errores de OCR
+                if (i === palabrasAlumno.length - 1 && palabrasAlumno.length >= 3) {
+                    weight *= 1.5; // 50% más peso al segundo apellido
+                    console.log(`  🔍 Segundo apellido detectado: "${palabra}" (peso aumentado)`);
+                }
+                
+                totalWeight += weight;
+                
+                // Buscar coincidencia exacta o fuzzy
+                let isMatch = textNormalized.includes(palabra);
+                let matchType = 'exacto';
+                
+                // Si no hay match exacto, buscar fuzzy (permite 1 carácter de diferencia por cada 5 caracteres)
+                if (!isMatch && palabra.length >= 4) {
+                    isMatch = this.fuzzyMatchInText(palabra, textNormalized);
+                    if (isMatch) matchType = 'fuzzy';
+                }
+                
+                if (isMatch) {
+                    matchedWords++;
+                    
+                    // Bonus por segundo apellido matcheado (muy confiable para confirmar identidad)
+                    if (i === palabrasAlumno.length - 1 && palabrasAlumno.length >= 3) {
+                        lastNameBonus = 0.3; // 30% bonus si el segundo apellido coincide
+                        console.log(`  ✅ Segundo apellido "${palabra}" coincide (${matchType}) - Bonus activado`);
+                    }
+                    
+                    // Bonus si la palabra aparece en orden relativo correcto
+                    const posInText = textNormalized.indexOf(palabra);
+                    let orderBonus = 0;
+                    
+                    // Verificar si palabras anteriores también están presentes y en orden
+                    if (i > 0) {
+                        const palabraAnterior = palabrasAlumno[i - 1];
+                        const posAnterior = textNormalized.indexOf(palabraAnterior);
+                        if (posAnterior !== -1 && posAnterior < posInText) {
+                            orderBonus = 0.2; // 20% bonus por orden correcto
+                        }
+                    }
+                    
+                    score += weight * (1 + orderBonus);
                 }
             }
             
-            // Si aparecen al menos 2 palabras (o todas si son menos de 3), es un match
-            const minMatches = palabrasAlumno.length >= 3 ? 2 : palabrasAlumno.length;
-            if (matches >= minMatches) {
-                console.log(`🎯 Match encontrado: ${alumno.name} (${matches}/${palabrasAlumno.length} palabras)`);
-                return alumno;
+            // Normalizar score (0 a 1)
+            const normalizedScore = score / totalWeight;
+            
+            // Penalizar si hay muy pocas palabras matched
+            const wordMatchRatio = matchedWords / palabrasAlumno.length;
+            let finalScore = normalizedScore * (0.5 + wordMatchRatio * 0.5);
+            
+            // Aplicar bonus por segundo apellido
+            finalScore = Math.min(1.0, finalScore * (1 + lastNameBonus));
+            
+            console.log(`📊 ${alumno.name}: ${(finalScore * 100).toFixed(1)}% (${matchedWords}/${palabrasAlumno.length} palabras)${lastNameBonus > 0 ? ' [+Segundo apellido]' : ''}`);
+            
+            // Actualizar mejor match
+            if (finalScore > bestScore && finalScore >= MIN_SCORE) {
+                bestScore = finalScore;
+                bestMatch = alumno;
             }
         }
         
-        return null;
+        if (bestMatch) {
+            console.log(`🎯 Match encontrado: ${bestMatch.name} con ${(bestScore * 100).toFixed(1)}% de similitud`);
+        } else {
+            console.log(`❌ No se encontró match suficientemente confiable (mejor: ${(bestScore * 100).toFixed(1)}%)`);
+        }
+        
+        return bestMatch;
+    }
+
+    fuzzyMatchInText(word, text) {
+        // Busca una palabra en el texto permitiendo pequeñas diferencias
+        // Útil para errores de OCR como Ñ -> N, O -> 0, etc.
+        
+        const maxDistance = Math.floor(word.length / 5); // 1 error cada 5 caracteres
+        const words = text.split(/\s+/);
+        
+        for (const textWord of words) {
+            if (textWord.length === 0) continue;
+            
+            // Calcular distancia de Levenshtein
+            const distance = this.levenshteinDistance(word, textWord);
+            
+            if (distance <= maxDistance) {
+                console.log(`  ✨ Fuzzy match: "${word}" ≈ "${textWord}" (distancia: ${distance})`);
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    levenshteinDistance(str1, str2) {
+        // Algoritmo de distancia de Levenshtein para medir similitud entre strings
+        const len1 = str1.length;
+        const len2 = str2.length;
+        const matrix = [];
+
+        // Inicializar matriz
+        for (let i = 0; i <= len1; i++) {
+            matrix[i] = [i];
+        }
+        for (let j = 0; j <= len2; j++) {
+            matrix[0][j] = j;
+        }
+
+        // Llenar matriz
+        for (let i = 1; i <= len1; i++) {
+            for (let j = 1; j <= len2; j++) {
+                const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j] + 1,      // Eliminación
+                    matrix[i][j - 1] + 1,      // Inserción
+                    matrix[i - 1][j - 1] + cost // Sustitución
+                );
+            }
+        }
+
+        return matrix[len1][len2];
     }
 
     matchNames(name1, name2) {
