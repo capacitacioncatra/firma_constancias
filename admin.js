@@ -2050,12 +2050,33 @@ class SimpleAdminPDF {
                 });
             }
             
-            // Buscar por nombre o CURP
-            const searchLower = searchTerm.toLowerCase();
-            const results = signatures.filter(sig => 
-                sig.fullName.toLowerCase().includes(searchLower) ||
-                sig.document.toLowerCase().includes(searchLower)
-            );
+            // Normalizar término de búsqueda (sin acentos, mayúsculas)
+            const searchNormalized = searchTerm
+                .toUpperCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .trim();
+            
+            console.log(`🔍 Búsqueda normalizada: "${searchTerm}" → "${searchNormalized}"`);
+            
+            // Buscar por nombre o CURP (normalizado)
+            const results = signatures.filter(sig => {
+                // Normalizar nombre de la firma
+                const nameNormalized = sig.fullName
+                    .toUpperCase()
+                    .normalize("NFD")
+                    .replace(/[\u0300-\u036f]/g, "");
+                
+                // Normalizar CURP/RFC
+                const docNormalized = sig.document
+                    .toUpperCase()
+                    .normalize("NFD")
+                    .replace(/[\u0300-\u036f]/g, "");
+                
+                // Buscar coincidencia
+                return nameNormalized.includes(searchNormalized) ||
+                       docNormalized.includes(searchNormalized);
+            });
 
             this.displaySearchResultsInModal(results);
 
@@ -2533,8 +2554,8 @@ class SimpleAdminPDF {
             return;
         }
 
-        // Obtener firmas de hoy
-        const todaySignatures = await this.getTodaySignatures();
+        // Obtener TODAS las firmas (no solo las de hoy)
+        const allSignatures = await this.getAllSignatures();
         
         // Comparar con lista esperada (SIN FILTRAR - mostrar totales generales)
         let presentCount = 0;
@@ -2542,7 +2563,7 @@ class SimpleAdminPDF {
         let constanciasCount = 0;
         
         for (const expected of this.attendanceList) {
-            const signature = todaySignatures.find(sig => {
+            const signature = allSignatures.find(sig => {
                 const sigNormalized = this.normalizeNameForMatch(sig.fullName);
                 return sigNormalized === expected.normalized;
             });
@@ -2645,8 +2666,8 @@ class SimpleAdminPDF {
         // Mostrar el filtro de gestores
         document.getElementById('gestorFilterTable').style.display = 'block';
 
-        // Obtener firmas de hoy
-        const todaySignatures = await this.getTodaySignatures();
+        // Obtener TODAS las firmas (no solo las de hoy)
+        const allSignatures = await this.getAllSignatures();
         
         // Filtrar lista por gestor seleccionado
         const filteredList = this.selectedGestor === 'TODOS' 
@@ -2660,8 +2681,8 @@ class SimpleAdminPDF {
         let rowNumber = 1;
         
         for (const expected of filteredList) {
-            // Buscar si firmó
-            const signature = todaySignatures.find(sig => {
+            // Buscar si firmó (en cualquier fecha)
+            const signature = allSignatures.find(sig => {
                 const sigNormalized = this.normalizeNameForMatch(sig.fullName);
                 return sigNormalized === expected.normalized;
             });
@@ -2682,11 +2703,17 @@ class SimpleAdminPDF {
             }
             
             const statusIcon = hasSignature ? '✓' : '✗';
-            const statusText = hasSignature ? 'Firmó' : 'Falta';
+            const statusText = hasSignature ? '' : '';
             const statusColor = hasSignature ? '#10b981' : '#ef4444';
             
             const timeText = hasSignature 
-                ? new Date(signature.timestamp).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+                ? new Date(signature.timestamp).toLocaleString('es-MX', { 
+                    day: '2-digit', 
+                    month: '2-digit', 
+                    year: 'numeric',
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                  })
                 : '-';
             
             const curpText = hasSignature && signature.document ? signature.document : '-';
@@ -2694,13 +2721,16 @@ class SimpleAdminPDF {
             // Verificar si tiene constancia cargada
             const hasConstancia = this.constanciasMap.has(expected.normalized);
             const constanciaIcon = hasConstancia ? '✓' : '✗';
-            const constanciaText = hasConstancia ? 'Cargada' : 'Falta';
+            const constanciaText = hasConstancia ? '' : '';
             const constanciaColor = hasConstancia ? '#10b981' : '#ef4444';
+            
+            // Crear ID único para esta fila
+            const rowId = `row_${rowNumber}_${expected.normalized.replace(/\s+/g, '_')}`;
             
             // Verificar si está marcada como impresa
             const isPrinted = hasSignature && signature.printed === true;
             const printedIcon = isPrinted ? '✓' : (hasSignature ? '○' : '-');
-            const printedText = isPrinted ? 'Impresa' : (hasSignature ? 'Pendiente' : '-');
+            const printedText = isPrinted ? '' : (hasSignature ? '' : '-');
             const printedColor = isPrinted ? '#10b981' : '#f59e0b';
             
             row.innerHTML = `
@@ -2708,9 +2738,32 @@ class SimpleAdminPDF {
                 <td style="padding: 12px; text-align: left; font-weight: 500; color: #1f2937;">${expected.name}</td>
                 <td style="padding: 12px; text-align: center; color: #64748b; font-weight: 500;">${expected.gestor}</td>
                 <td style="padding: 12px; text-align: center;">
-                    <span style="display: inline-block; padding: 4px 12px; background: ${constanciaColor}15; border: 1px solid ${constanciaColor}; border-radius: 4px; font-weight: 600; font-size: 0.85rem; color: ${constanciaColor};">
-                        ${constanciaIcon} ${constanciaText}
-                    </span>
+                    <div style="display: flex; gap: 8px; align-items: center; justify-content: center;">
+                        <span style="display: inline-block; padding: 4px 12px; background: ${constanciaColor}15; border: 1px solid ${constanciaColor}; border-radius: 4px; font-weight: 600; font-size: 0.85rem; color: ${constanciaColor};">
+                            ${constanciaIcon} ${constanciaText}
+                        </span>
+                        ${!hasConstancia ? `
+                            <button 
+                                onclick="adminPDF.uploadManualConstancia('${expected.normalized}', '${expected.name.replace(/'/g, "\\'")}')"
+                                style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; white-space: nowrap; transition: background 0.2s;"
+                                onmouseover="this.style.background='#2563eb'"
+                                onmouseout="this.style.background='#3b82f6'"
+                                title="Subir constancia manualmente"
+                            >
+                                📤
+                            </button>
+                        ` : `
+                            <button 
+                                onclick="adminPDF.removeConstancia('${expected.normalized}', '${expected.name.replace(/'/g, "\\'")}')"
+                                style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; white-space: nowrap; transition: background 0.2s;"
+                                onmouseover="this.style.background='#dc2626'"
+                                onmouseout="this.style.background='#ef4444'"
+                                title="Quitar constancia"
+                            >
+                                🗑️
+                            </button>
+                        `}
+                    </div>
                 </td>
                 <td style="padding: 12px; text-align: center;">
                     <span style="display: inline-block; padding: 4px 12px; background: ${statusColor}15; border: 1px solid ${statusColor}; border-radius: 4px; font-weight: 600; font-size: 0.85rem; color: ${statusColor};">
@@ -2783,6 +2836,57 @@ class SimpleAdminPDF {
         }
     }
 
+    uploadManualConstancia(normalizedName, fullName) {
+        console.log(`📤 Subir constancia manual para: ${fullName}`);
+        
+        // Crear input file temporal
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.pdf,.jpg,.jpeg,.png,image/*';
+        
+        input.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            console.log(`📄 Archivo seleccionado: ${file.name}`);
+            
+            // Guardar en el mapa sin OCR
+            this.constanciasMap.set(normalizedName, file);
+            
+            console.log(`✅ Constancia asignada manualmente: ${file.name} → ${fullName}`);
+            
+            // Actualizar la tabla
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+            
+            // Actualizar estadísticas
+            await this.updateAttendanceInfo();
+            
+            alert(`✅ Constancia asignada correctamente a:\n${fullName}`);
+        };
+        
+        // Trigger click
+        input.click();
+    }
+
+    removeConstancia(normalizedName, fullName) {
+        if (!confirm(`¿Quitar la constancia de:\n\n${fullName}?`)) {
+            return;
+        }
+        
+        console.log(`🗑️ Quitando constancia de: ${fullName}`);
+        
+        // Eliminar del mapa
+        this.constanciasMap.delete(normalizedName);
+        
+        console.log(`✅ Constancia eliminada de: ${fullName}`);
+        
+        // Actualizar la tabla
+        this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+        
+        // Actualizar estadísticas
+        this.updateAttendanceInfo();
+    }
+
     async loadConstancias(files) {
         console.log('🔍 loadConstancias llamada con files:', files);
         
@@ -2818,7 +2922,7 @@ class SimpleAdminPDF {
             try {
                 progressText.textContent = `Escaneando archivo ${i + 1} de ${files.length}...`;
                 progressBar.style.width = `${((i + 1) / files.length) * 100}%`;
-                console.log(`📄 Escaneando (${i + 1}/${files.length}): ${file.name}`);
+                console.log(`\n📄 ========== Escaneando (${i + 1}/${files.length}): ${file.name} ==========`);
                 
                 // Escanear el archivo con OCR
                 const scannedText = await this.scanConstanciaForName(file);
@@ -2829,7 +2933,7 @@ class SimpleAdminPDF {
                     continue;
                 }
 
-                console.log(`📝 Texto escaneado de ${file.name}:`, scannedText.substring(0, 200));
+                console.log(`📝 Texto final para búsqueda:`, scannedText.substring(0, 250));
                 
                 // Buscar coincidencia con alumnos de la lista
                 const matchedAlumno = this.findAlumnoInText(scannedText);
@@ -2837,10 +2941,13 @@ class SimpleAdminPDF {
                 if (matchedAlumno) {
                     // Guardar el archivo en el mapa
                     this.constanciasMap.set(matchedAlumno.normalized, file);
-                    console.log(`✅ Asociado: ${file.name} → ${matchedAlumno.name}`);
+                    console.log(`✅ ASOCIADO: ${file.name} → ${matchedAlumno.name}`);
+                    console.log(`   Normalizado: ${matchedAlumno.normalized}`);
                     processedCount++;
                 } else {
-                    console.warn(`⚠️ No se encontró alumno en: ${file.name}`);
+                    console.warn(`\n❌ NO SE ENCONTRÓ MATCH para: ${file.name}`);
+                    console.warn(`   Mejor score obtenido en la búsqueda fue insuficiente`);
+                    console.warn(`   Revisa los logs anteriores para ver los scores de cada alumno\n`);
                     notFoundFiles.push(file.name);
                 }
             } catch (error) {
@@ -2928,7 +3035,30 @@ class SimpleAdminPDF {
                 }
             );
 
-            return result.data.text;
+            // Filtrar el texto para obtener solo las partes relevantes (nombres)
+            const fullText = result.data.text;
+            console.log(`📄 OCR completo de ${file.name}:`, fullText.substring(0, 300));
+            
+            // Extraer líneas que probablemente contienen el nombre
+            // Buscar líneas con palabras largas en mayúsculas (típicamente el nombre principal)
+            const lines = fullText.split('\n');
+            const relevantLines = lines.filter(line => {
+                // Filtrar líneas vacías o muy cortas
+                if (line.trim().length < 10) return false;
+                
+                // Buscar líneas con al menos 2 palabras largas en mayúsculas
+                const upperWords = line.match(/\b[A-ZÁÉÍÓÚÑ]{3,}\b/g);
+                return upperWords && upperWords.length >= 2;
+            });
+            
+            console.log(`🔍 Líneas relevantes encontradas:`, relevantLines.slice(0, 5));
+            
+            // Si encontramos líneas relevantes, usarlas; sino usar todo el texto
+            const textToSearch = relevantLines.length > 0 
+                ? relevantLines.join(' ') 
+                : fullText;
+            
+            return textToSearch;
         } catch (error) {
             console.error('Error en OCR:', error);
             return null;
@@ -2952,9 +3082,26 @@ class SimpleAdminPDF {
         // Esto ayuda cuando el OCR no reconoce caracteres especiales como Ñ
         textNormalized = textNormalized.replace(/\s{2,}/g, '');
         
+        // MEJORADO: Juntar fragmentos que probablemente sean parte de una palabra
+        // Esto compensa errores de OCR con Ñ que genera espacios inesperados
+        
+        // 1. Juntar palabras cortas (1-3 letras) con la siguiente
+        // Ejemplo: "NU EZ" -> "NUEZ"
+        textNormalized = textNormalized.replace(/\b([A-Z]{1,3})\s+([A-Z]{2,})\b/g, '$1$2');
+        
+        // 2. Juntar palabras que terminan con vocal + palabra corta (2-3 letras)
+        // Ejemplo: "VILLASE OR" -> "VILLASEOR", "PE A" -> "PEA"
+        textNormalized = textNormalized.replace(/\b([A-Z]+[AEIOU])\s+([A-Z]{2,3})\b/g, '$1$2');
+        
+        // 3. Juntar cualquier palabra + fragmento de 2 letras si parece apellido
+        // Ejemplo: "GARCIA NA" -> "GARCIANA"
+        textNormalized = textNormalized.replace(/\b([A-Z]{4,})\s+([A-Z]{2})\b/g, '$1$2');
+        
+        console.log(`📝 Texto normalizado para matching: ${textNormalized.substring(0, 200)}`);
+        
         let bestMatch = null;
         let bestScore = 0;
-        const MIN_SCORE = 0.65; // Reducido a 65% para compensar errores de OCR
+        const MIN_SCORE = 0.55; // Reducido a 55% para compensar errores graves de OCR
         
         // Buscar cada alumno en el texto
         for (const alumno of this.attendanceList) {
@@ -2985,10 +3132,22 @@ class SimpleAdminPDF {
                 let isMatch = textNormalized.includes(palabra);
                 let matchType = 'exacto';
                 
-                // Si no hay match exacto, buscar fuzzy (permite 1 carácter de diferencia por cada 5 caracteres)
+                // Si no hay match exacto, buscar fuzzy (permite 1 carácter de diferencia por cada 4 caracteres)
                 if (!isMatch && palabra.length >= 4) {
                     isMatch = this.fuzzyMatchInText(palabra, textNormalized);
                     if (isMatch) matchType = 'fuzzy';
+                }
+                
+                // Si aún no hay match y la palabra es larga (apellido con Ñ), buscar variaciones
+                // Ejemplo: "VILLASEÑOR" busca "VILLASEOR", "VILLASE", etc.
+                if (!isMatch && palabra.length >= 7) {
+                    // Buscar subcadenas largas (mínimo 6 caracteres)
+                    const substringToFind = palabra.substring(0, Math.max(6, palabra.length - 2));
+                    if (textNormalized.includes(substringToFind)) {
+                        isMatch = true;
+                        matchType = 'parcial';
+                        console.log(`  🔸 Match parcial: "${palabra}" encontrado como "${substringToFind}"`);
+                    }
                 }
                 
                 if (isMatch) {
@@ -3049,17 +3208,23 @@ class SimpleAdminPDF {
         // Busca una palabra en el texto permitiendo pequeñas diferencias
         // Útil para errores de OCR como Ñ -> N, O -> 0, etc.
         
-        const maxDistance = Math.floor(word.length / 5); // 1 error cada 5 caracteres
+        // Aumentar tolerancia: 1 error cada 4 caracteres (más permisivo para Ñ)
+        const maxDistance = Math.max(1, Math.floor(word.length / 4));
         const words = text.split(/\s+/);
         
         for (const textWord of words) {
             if (textWord.length === 0) continue;
             
+            // Si las longitudes son muy diferentes, saltar (optimización)
+            if (Math.abs(word.length - textWord.length) > maxDistance + 1) {
+                continue;
+            }
+            
             // Calcular distancia de Levenshtein
             const distance = this.levenshteinDistance(word, textWord);
             
             if (distance <= maxDistance) {
-                console.log(`  ✨ Fuzzy match: "${word}" ≈ "${textWord}" (distancia: ${distance})`);
+                console.log(`  ✨ Fuzzy match: "${word}" ≈ "${textWord}" (distancia: ${distance}/${maxDistance})`);
                 return true;
             }
         }
@@ -3132,8 +3297,8 @@ class SimpleAdminPDF {
             ? this.attendanceList 
             : this.attendanceList.filter(item => item.gestor === selectedGestor);
         
-        // Obtener firmas
-        const todaySignatures = await this.getTodaySignatures();
+        // Obtener TODAS las firmas (no solo de hoy)
+        const allSignatures = await this.getAllSignatures();
         
         // Filtrar solo los que tienen constancia cargada Y tienen firma
         const alumnosToProcess = [];
@@ -3142,8 +3307,8 @@ class SimpleAdminPDF {
             const hasConstancia = this.constanciasMap.has(alumno.normalized);
             
             if (hasConstancia) {
-                // Buscar si tiene firma
-                const signature = todaySignatures.find(sig => {
+                // Buscar si tiene firma (en cualquier fecha)
+                const signature = allSignatures.find(sig => {
                     const sigNormalized = this.normalizeNameForMatch(sig.fullName);
                     return sigNormalized === alumno.normalized;
                 });

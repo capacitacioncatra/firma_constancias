@@ -214,10 +214,29 @@ class SignatureForm {
         submitBtn.disabled = true;
         submitBtn.textContent = '⏳ Guardando...';
 
-        // Get form data
+        // Get form data y normalizar (quitar acentos, mayúsculas)
+        const rawName = document.getElementById('fullName').value.trim();
+        const rawDoc = document.getElementById('document').value.trim();
+        
+        // Normalizar: remover acentos y convertir a mayúsculas
+        const normalizedName = rawName
+            .toUpperCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "") // Quitar acentos
+            .replace(/\s+/g, ' ') // Normalizar espacios
+            .trim();
+        
+        const normalizedDoc = rawDoc
+            .toUpperCase()
+            .replace(/[^A-Z0-9]/g, '') // Solo letras y números
+            .trim();
+        
+        console.log('📝 Datos originales:', { nombre: rawName, curp: rawDoc });
+        console.log('✅ Datos normalizados:', { nombre: normalizedName, curp: normalizedDoc });
+        
         const formData = {
-            fullName: document.getElementById('fullName').value.trim(),
-            document: document.getElementById('document').value.trim(),
+            fullName: normalizedName,
+            document: normalizedDoc,
             signature: this.signatureCapture.getSignatureData(),
             timestamp: new Date().toISOString(),
             id: Date.now().toString()
@@ -373,7 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fullNameInput.addEventListener('input', function(e) {
             const start = this.selectionStart;
             const end = this.selectionEnd;
-            // Convertir a mayúsculas y permitir solo letras y espacios
+            // Convertir a mayúsculas y permitir letras, espacios y acentos (se quitarán al guardar)
             this.value = this.value.toUpperCase().replace(/[^A-ZÁÉÍÓÚÑ\s]/g, '');
             this.setSelectionRange(start, end);
         });
