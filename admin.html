@@ -268,6 +268,10 @@
                     <button id="printGestorBtn" class="btn btn-primary" style="padding: 12px 24px; white-space: nowrap;" disabled>
                         🖨️ Imprimir Gestor Seleccionado
                     </button>
+                    
+                    <button id="exportMissingBtn" class="btn btn-secondary" style="padding: 12px 24px; white-space: nowrap; background: #f59e0b; border-color: #f59e0b; color: white;">
+                        📥 Exportar Faltantes
+                    </button>
                 </div>
                 
                 <!-- Indicador de progreso de carga de constancias -->
@@ -314,6 +318,28 @@
             <div id="noAttendanceMessage" style="display: none; text-align: center; padding: 50px; background: #fef3c7; border-radius: 8px; border: 1px solid #f59e0b; margin-top: 20px;">
                 <p style="font-size: 1.3rem; color: #92400e; margin-bottom: 10px;">No hay lista de asistencia cargada</p>
                 <p style="color: #78350f; font-size: 0.95rem;">Carga un archivo Excel con los nombres esperados para ver el cotejo</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Edición de Firma -->
+    <div id="editSignatureModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: white; border-radius: 12px; padding: 30px; max-width: 500px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3);">
+            <h3 style="margin: 0 0 25px 0; color: #1f2937; font-size: 1.5rem;">✏️ Editar Datos de Firma</h3>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">Nombre Completo:</label>
+                <input type="text" id="editFullName" style="width: 100%; padding: 12px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 1rem;">
+            </div>
+            
+            <div style="margin-bottom: 25px;">
+                <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">CURP/RFC:</label>
+                <input type="text" id="editDocument" style="width: 100%; padding: 12px; border: 2px solid #d1d5db; border-radius: 6px; font-size: 1rem;">
+            </div>
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button id="cancelEditBtn" class="btn btn-secondary" style="padding: 10px 20px;">Cancelar</button>
+                <button id="saveEditBtn" class="btn btn-primary" style="padding: 10px 20px;">💾 Guardar Cambios</button>
             </div>
         </div>
     </div>

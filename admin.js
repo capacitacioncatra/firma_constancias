@@ -207,6 +207,11 @@ class SimpleAdminPDF {
             this.printByGestor();
         });
 
+        // Exportar faltantes por gestor
+        document.getElementById('exportMissingBtn').addEventListener('click', () => {
+            this.exportMissingSignatures();
+        });
+
         // Actualizar estadísticas
         this.updateStats();
     }
@@ -1146,10 +1151,21 @@ class SimpleAdminPDF {
                         📅 ${new Date(sig.timestamp).toLocaleString('es-MX')}
                     </p>
                 </div>
-                <button class="btn-delete-signature" data-id="${sig.id}" data-name="${sig.fullName}" style="background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s;">
-                    🗑️ Eliminar
-                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn-edit-signature" data-id="${sig.id}" style="background: #3b82f6; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s;">
+                        ✏️ Editar
+                    </button>
+                    <button class="btn-delete-signature" data-id="${sig.id}" data-name="${sig.fullName}" style="background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s;">
+                        🗑️ Eliminar
+                    </button>
+                </div>
             `;
+            
+            // Agregar evento de edición
+            const editBtn = card.querySelector('.btn-edit-signature');
+            editBtn.addEventListener('mouseover', () => editBtn.style.background = '#2563eb');
+            editBtn.addEventListener('mouseout', () => editBtn.style.background = '#3b82f6');
+            editBtn.addEventListener('click', () => this.editSignature(sig));
             
             // Agregar evento de eliminación
             const deleteBtn = card.querySelector('.btn-delete-signature');
@@ -1159,6 +1175,127 @@ class SimpleAdminPDF {
             
             listContainer.appendChild(card);
         });
+    }
+
+    editSignature(signature) {
+        // Guardar referencia a la firma actual
+        this.currentEditingSignature = signature;
+        
+        // Mostrar modal
+        const modal = document.getElementById('editSignatureModal');
+        modal.style.display = 'flex';
+        
+        // Rellenar campos con datos actuales
+        document.getElementById('editFullName').value = signature.fullName || '';
+        document.getElementById('editDocument').value = signature.document || '';
+        
+        // Event listeners para botones del modal (solo una vez)
+        const saveBtn = document.getElementById('saveEditBtn');
+        const cancelBtn = document.getElementById('cancelEditBtn');
+        
+        // Clonar botones para eliminar event listeners anteriores
+        const newSaveBtn = saveBtn.cloneNode(true);
+        const newCancelBtn = cancelBtn.cloneNode(true);
+        saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+        cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+        
+        // Agregar nuevos event listeners
+        newSaveBtn.addEventListener('click', () => this.saveSignatureEdit());
+        newCancelBtn.addEventListener('click', () => this.closeEditModal());
+        
+        // Cerrar modal con Escape
+        const escapeHandler = (e) => {
+            if (e.key === 'Escape') {
+                this.closeEditModal();
+                document.removeEventListener('keydown', escapeHandler);
+            }
+        };
+        document.addEventListener('keydown', escapeHandler);
+    }
+
+    closeEditModal() {
+        const modal = document.getElementById('editSignatureModal');
+        modal.style.display = 'none';
+        this.currentEditingSignature = null;
+    }
+
+    async saveSignatureEdit() {
+        const newFullName = document.getElementById('editFullName').value.trim();
+        const newDocument = document.getElementById('editDocument').value.trim();
+        
+        // Validaciones
+        if (!newFullName) {
+            alert('⚠️ El nombre completo es obligatorio');
+            return;
+        }
+        
+        if (!newDocument) {
+            alert('⚠️ El CURP/RFC es obligatorio');
+            return;
+        }
+        
+        try {
+            console.log('💾 Guardando cambios en firma:', this.currentEditingSignature.id);
+            
+            // Normalizar datos (igual que en app.js)
+            const normalizedFullName = newFullName
+                .toUpperCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/\s+/g, ' ')
+                .trim();
+            
+            const normalizedDocument = newDocument
+                .toUpperCase()
+                .replace(/[^A-Z0-9]/g, '');
+            
+            // Actualizar objeto de firma
+            const updatedSignature = {
+                ...this.currentEditingSignature,
+                fullName: normalizedFullName,
+                document: normalizedDocument,
+                lastModified: Date.now()
+            };
+            
+            // Actualizar en Firebase Firestore si está disponible
+            if (CONFIG.USE_FIREBASE && db) {
+                try {
+                    await db.collection('signatures').doc(updatedSignature.id).update({
+                        fullName: normalizedFullName,
+                        document: normalizedDocument,
+                        lastModified: Date.now()
+                    });
+                    console.log('✅ Firma actualizada en Firestore');
+                } catch (firestoreError) {
+                    console.error('❌ Error actualizando en Firestore:', firestoreError);
+                    console.warn('⚠️ Continuando con actualización de localStorage...');
+                }
+            }
+            
+            // Actualizar en localStorage
+            let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+            const index = signatures.findIndex(sig => sig.id === updatedSignature.id);
+            
+            if (index !== -1) {
+                signatures[index] = updatedSignature;
+                localStorage.setItem('signatures', JSON.stringify(signatures));
+                console.log('✅ Firma actualizada en localStorage');
+            }
+            
+            // Cerrar modal
+            this.closeEditModal();
+            
+            // Actualizar interfaz
+            await this.showSignaturesList();
+            await this.updateStats();
+            
+            // Mensaje de éxito
+            alert(`✅ Datos actualizados correctamente:\n\nNombre: ${normalizedFullName}\nCURP/RFC: ${normalizedDocument}`);
+            
+        } catch (error) {
+            console.error('❌ Error al guardar cambios:', error);
+            alert('❌ Error al guardar los cambios. Por favor intenta de nuevo.');
+        }
     }
 
     async deleteSignature(signatureId, signatureName) {
@@ -2133,10 +2270,21 @@ class SimpleAdminPDF {
                             📅 ${new Date(sig.timestamp).toLocaleString('es-MX')}
                         </p>
                     </div>
-                    <button class="btn-delete-signature" data-id="${sig.id}" data-name="${sig.fullName}" style="background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s;">
-                        🗑️ Eliminar
-                    </button>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="btn-edit-signature" data-id="${sig.id}" style="background: #3b82f6; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s;">
+                            ✏️  
+                        </button>
+                        <button class="btn-delete-signature" data-id="${sig.id}" data-name="${sig.fullName}" style="background: #ef4444; color: white; border: none; padding: 10px 15px; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: background 0.2s;">
+                            🗑️
+                        </button>
+                    </div>
                 `;
+                
+                // Agregar evento de edición
+                const editBtn = card.querySelector('.btn-edit-signature');
+                editBtn.addEventListener('mouseover', () => editBtn.style.background = '#2563eb');
+                editBtn.addEventListener('mouseout', () => editBtn.style.background = '#3b82f6');
+                editBtn.addEventListener('click', () => this.editSignature(sig));
                 
                 // Agregar evento de eliminación
                 const deleteBtn = card.querySelector('.btn-delete-signature');
@@ -3035,30 +3183,7 @@ class SimpleAdminPDF {
                 }
             );
 
-            // Filtrar el texto para obtener solo las partes relevantes (nombres)
-            const fullText = result.data.text;
-            console.log(`📄 OCR completo de ${file.name}:`, fullText.substring(0, 300));
-            
-            // Extraer líneas que probablemente contienen el nombre
-            // Buscar líneas con palabras largas en mayúsculas (típicamente el nombre principal)
-            const lines = fullText.split('\n');
-            const relevantLines = lines.filter(line => {
-                // Filtrar líneas vacías o muy cortas
-                if (line.trim().length < 10) return false;
-                
-                // Buscar líneas con al menos 2 palabras largas en mayúsculas
-                const upperWords = line.match(/\b[A-ZÁÉÍÓÚÑ]{3,}\b/g);
-                return upperWords && upperWords.length >= 2;
-            });
-            
-            console.log(`🔍 Líneas relevantes encontradas:`, relevantLines.slice(0, 5));
-            
-            // Si encontramos líneas relevantes, usarlas; sino usar todo el texto
-            const textToSearch = relevantLines.length > 0 
-                ? relevantLines.join(' ') 
-                : fullText;
-            
-            return textToSearch;
+            return result.data.text;
         } catch (error) {
             console.error('Error en OCR:', error);
             return null;
@@ -3383,6 +3508,74 @@ class SimpleAdminPDF {
             btn.disabled = false;
             btn.textContent = originalText;
         }
+    }
+
+    async exportMissingSignatures() {
+        if (!this.attendanceList || this.attendanceList.length === 0) {
+            alert('⚠️ Primero debes cargar la lista de asistencia desde el Excel.');
+            return;
+        }
+
+        const selectedGestor = this.selectedGestor;
+        
+        // Filtrar lista por gestor
+        const filteredList = selectedGestor === 'TODOS' 
+            ? this.attendanceList 
+            : this.attendanceList.filter(item => item.gestor === selectedGestor);
+        
+        // Obtener TODAS las firmas
+        const allSignatures = await this.getAllSignatures();
+        
+        // Encontrar los que NO tienen firma
+        const missingSignatures = [];
+        
+        for (const alumno of filteredList) {
+            // Buscar si tiene firma
+            const signature = allSignatures.find(sig => {
+                const sigNormalized = this.normalizeNameForMatch(sig.fullName);
+                return sigNormalized === alumno.normalized;
+            });
+            
+            if (!signature) {
+                missingSignatures.push({
+                    nombre: alumno.name,
+                    gestor: alumno.gestor
+                });
+            }
+        }
+
+        if (missingSignatures.length === 0) {
+            alert(`✅ ¡Excelente! No hay personas faltantes de firmar del gestor "${selectedGestor}".`);
+            return;
+        }
+
+        // Crear CSV
+        let csvContent = '\uFEFF'; // BOM para UTF-8
+        csvContent += 'Nombre Completo,Gestor\n';
+        
+        missingSignatures.forEach(person => {
+            // Escapar comas y comillas en los datos
+            const nombre = `"${person.nombre.replace(/"/g, '""')}"`;
+            const gestor = `"${person.gestor.replace(/"/g, '""')}"`;
+            csvContent += `${nombre},${gestor}\n`;
+        });
+
+        // Crear y descargar archivo
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        const gestorName = selectedGestor === 'TODOS' ? 'TODOS' : selectedGestor;
+        const dateStr = new Date().toISOString().split('T')[0];
+        a.download = `Faltantes_${gestorName}_${dateStr}.csv`;
+        
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        alert(`📥 Archivo exportado exitosamente\n\n✓ Gestor: ${selectedGestor}\n✓ Personas faltantes: ${missingSignatures.length}\n✓ Archivo: Faltantes_${gestorName}_${dateStr}.csv`);
     }
 
     async processConstanciaWithSignature(file, signature) {
