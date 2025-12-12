@@ -3465,22 +3465,43 @@ class SimpleAdminPDF {
         try {
             const signedPdfs = [];
             const processedSignatureIds = [];
+            const failedItems = [];
 
             for (let i = 0; i < alumnosToProcess.length; i++) {
                 const item = alumnosToProcess[i];
                 console.log(`📝 Procesando ${i + 1}/${alumnosToProcess.length}: ${item.alumno.name}`);
 
-                // Procesar constancia
-                const signedPdf = await this.processConstanciaWithSignature(
-                    item.constanciaFile,
-                    item.signature
-                );
+                try {
+                    // Procesar constancia
+                    const signedPdf = await this.processConstanciaWithSignature(
+                        item.constanciaFile,
+                        item.signature
+                    );
 
-                signedPdfs.push(signedPdf);
-                processedSignatureIds.push(item.signature.id);
+                    signedPdfs.push(signedPdf);
+                    processedSignatureIds.push(item.signature.id);
+                } catch (itemError) {
+                    console.error(`❌ Error con ${item.alumno.name}:`, itemError);
+                    failedItems.push({
+                        nombre: item.alumno.name,
+                        error: itemError.message,
+                        fecha: item.signature.timestamp ? new Date(item.signature.timestamp).toLocaleDateString() : 'Desconocida'
+                    });
+                }
             }
 
-            // Combinar todos los PDFs
+            // Si todas fallaron, detener
+            if (signedPdfs.length === 0) {
+                let errorMsg = '❌ No se pudo procesar ninguna constancia.\n\n';
+                errorMsg += 'Problemas encontrados:\n\n';
+                failedItems.forEach(item => {
+                    errorMsg += `• ${item.nombre} (${item.fecha})\n  ${item.error}\n\n`;
+                });
+                alert(errorMsg);
+                return;
+            }
+
+            // Combinar todos los PDFs exitosos
             console.log(`📁 Combinando ${signedPdfs.length} PDFs...`);
             const combinedPdf = await this.combinePdfs(signedPdfs);
             
@@ -3488,7 +3509,7 @@ class SimpleAdminPDF {
             const fileName = `Constancias_${gestorName}_${new Date().toISOString().split('T')[0]}.pdf`;
             this.downloadPdf(combinedPdf, fileName);
 
-            // Marcar como impresas
+            // Marcar como impresas solo las exitosas
             for (const signatureId of processedSignatureIds) {
                 await this.markAsPrinted(signatureId);
             }
@@ -3496,7 +3517,16 @@ class SimpleAdminPDF {
             // Actualizar estadísticas
             await this.updateAttendanceInfo();
 
-            alert(`✅ ¡Proceso completado!\n\n✓ ${signedPdfs.length} constancias firmadas\n✓ ${processedSignatureIds.length} marcadas como impresas\n✓ PDF descargado: ${fileName}`);
+            let successMsg = `✅ Proceso completado!\n\n✓ ${signedPdfs.length} constancias firmadas correctamente\n✓ ${processedSignatureIds.length} marcadas como impresas\n✓ PDF descargado: ${fileName}`;
+            
+            if (failedItems.length > 0) {
+                successMsg += `\n\n⚠️ ${failedItems.length} constancias con problemas:\n\n`;
+                failedItems.forEach(item => {
+                    successMsg += `• ${item.nombre} (${item.fecha})\n`;
+                });
+            }
+            
+            alert(successMsg);
 
             // Recargar tabla
             await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
@@ -3579,94 +3609,123 @@ class SimpleAdminPDF {
     }
 
     async processConstanciaWithSignature(file, signature) {
-        // Leer archivo
-        const arrayBuffer = await file.arrayBuffer();
-        const header = new Uint8Array(arrayBuffer.slice(0, 5));
-        const headerStr = String.fromCharCode(...header);
+        try {
+            // Validar que el archivo existe y tiene contenido
+            if (!file || !file.size) {
+                throw new Error(`Archivo vacío o inválido para ${signature.fullName}`);
+            }
 
-        let imageData;
-        let pageWidth, pageHeight;
+            console.log(`📄 Procesando constancia de ${signature.fullName} - Tamaño: ${file.size} bytes`);
 
-        // Si es imagen, convertir a canvas
-        if (!headerStr.startsWith('%PDF')) {
-            const blob = new Blob([arrayBuffer]);
-            const imageUrl = URL.createObjectURL(blob);
-            const img = new Image();
+            // Leer archivo con validación
+            const arrayBuffer = await file.arrayBuffer();
             
-            await new Promise((resolve, reject) => {
-                img.onload = resolve;
-                img.onerror = reject;
-                img.src = imageUrl;
+            if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+                throw new Error(`El archivo de constancia para ${signature.fullName} está vacío`);
+            }
+
+            // Validar que hay suficientes bytes para leer el header
+            if (arrayBuffer.byteLength < 5) {
+                throw new Error(`El archivo de constancia para ${signature.fullName} es demasiado pequeño (${arrayBuffer.byteLength} bytes)`);
+            }
+
+            const header = new Uint8Array(arrayBuffer.slice(0, 5));
+            const headerStr = String.fromCharCode(...header);
+
+            let imageData;
+            let pageWidth, pageHeight;
+
+            // Si es imagen, convertir a canvas
+            if (!headerStr.startsWith('%PDF')) {
+                console.log(`🖼️ Procesando como imagen: ${file.name}`);
+                const blob = new Blob([arrayBuffer]);
+                const imageUrl = URL.createObjectURL(blob);
+                const img = new Image();
+                
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = () => reject(new Error(`No se pudo cargar la imagen para ${signature.fullName}`));
+                    img.src = imageUrl;
+                });
+
+                const canvas = document.createElement('canvas');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0);
+                
+                imageData = canvas.toDataURL('image/png');
+                pageWidth = img.width;
+                pageHeight = img.height;
+                
+                URL.revokeObjectURL(imageUrl);
+            }
+
+            // Crear PDF firmado
+            const pdfDoc = await PDFLib.PDFDocument.create();
+            let page;
+
+            if (imageData) {
+                // Usar imagen
+                let backgroundImage;
+                if (imageData.includes('data:image/png')) {
+                    const imgBytes = this.dataURLToArrayBuffer(imageData);
+                    backgroundImage = await pdfDoc.embedPng(imgBytes);
+                } else {
+                    const imgBytes = this.dataURLToArrayBuffer(imageData);
+                    backgroundImage = await pdfDoc.embedJpg(imgBytes);
+                }
+                
+                pageWidth = backgroundImage.width;
+                pageHeight = backgroundImage.height;
+                page = pdfDoc.addPage([pageWidth, pageHeight]);
+                page.drawImage(backgroundImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
+            } else {
+                console.log(`📑 Procesando como PDF: ${file.name}`);
+                // Copiar PDF existente con validación
+                const existingPdf = await PDFLib.PDFDocument.load(arrayBuffer, { ignoreEncryption: true });
+                const pages = existingPdf.getPages();
+                
+                if (!pages || pages.length === 0) {
+                    throw new Error(`El PDF de constancia para ${signature.fullName} no tiene páginas`);
+                }
+                
+                pageWidth = pages[0].getWidth();
+                pageHeight = pages[0].getHeight();
+                
+                const [copiedPage] = await pdfDoc.copyPages(existingPdf, [0]);
+                pdfDoc.addPage(copiedPage);
+                page = pdfDoc.getPages()[0];
+            }
+
+            // Embedear firmas
+            const userSigImage = await this.embedImage(pdfDoc, signature.signature);
+            const repSigImage = await this.embedImage(pdfDoc, this.representantSignature);
+
+            // Calcular escala
+            const BASE_WIDTH = 1000;
+            const scale = pageWidth / BASE_WIDTH;
+
+            // Dibujar firmas
+            page.drawImage(userSigImage, {
+                x: this.COORDENADAS.usuario.x * scale,
+                y: pageHeight - (this.COORDENADAS.usuario.y * scale) - (this.COORDENADAS.usuario.alto * scale),
+                width: this.COORDENADAS.usuario.ancho * scale,
+                height: this.COORDENADAS.usuario.alto * scale,
             });
 
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            
-            imageData = canvas.toDataURL('image/png');
-            pageWidth = img.width;
-            pageHeight = img.height;
-            
-            URL.revokeObjectURL(imageUrl);
+            page.drawImage(repSigImage, {
+                x: this.COORDENADAS.representante.x * scale,
+                y: pageHeight - (this.COORDENADAS.representante.y * scale) - (this.COORDENADAS.representante.alto * scale),
+                width: this.COORDENADAS.representante.ancho * scale,
+                height: this.COORDENADAS.representante.alto * scale,
+            });
+
+            return await pdfDoc.save();
+        } catch (error) {
+            console.error(`❌ Error procesando constancia para ${signature.fullName}:`, error);
+            throw new Error(`Error al procesar constancia de ${signature.fullName}: ${error.message}`);
         }
-
-        // Crear PDF firmado
-        const pdfDoc = await PDFLib.PDFDocument.create();
-        let page;
-
-        if (imageData) {
-            // Usar imagen
-            let backgroundImage;
-            if (imageData.includes('data:image/png')) {
-                const imgBytes = this.dataURLToArrayBuffer(imageData);
-                backgroundImage = await pdfDoc.embedPng(imgBytes);
-            } else {
-                const imgBytes = this.dataURLToArrayBuffer(imageData);
-                backgroundImage = await pdfDoc.embedJpg(imgBytes);
-            }
-            
-            pageWidth = backgroundImage.width;
-            pageHeight = backgroundImage.height;
-            page = pdfDoc.addPage([pageWidth, pageHeight]);
-            page.drawImage(backgroundImage, { x: 0, y: 0, width: pageWidth, height: pageHeight });
-        } else {
-            // Copiar PDF existente
-            const existingPdf = await PDFLib.PDFDocument.load(arrayBuffer);
-            const pages = existingPdf.getPages();
-            pageWidth = pages[0].getWidth();
-            pageHeight = pages[0].getHeight();
-            
-            const [copiedPage] = await pdfDoc.copyPages(existingPdf, [0]);
-            pdfDoc.addPage(copiedPage);
-            page = pdfDoc.getPages()[0];
-        }
-
-        // Embedear firmas
-        const userSigImage = await this.embedImage(pdfDoc, signature.signature);
-        const repSigImage = await this.embedImage(pdfDoc, this.representantSignature);
-
-        // Calcular escala
-        const BASE_WIDTH = 1000;
-        const scale = pageWidth / BASE_WIDTH;
-
-        // Dibujar firmas
-        page.drawImage(userSigImage, {
-            x: this.COORDENADAS.usuario.x * scale,
-            y: pageHeight - (this.COORDENADAS.usuario.y * scale) - (this.COORDENADAS.usuario.alto * scale),
-            width: this.COORDENADAS.usuario.ancho * scale,
-            height: this.COORDENADAS.usuario.alto * scale,
-        });
-
-        page.drawImage(repSigImage, {
-            x: this.COORDENADAS.representante.x * scale,
-            y: pageHeight - (this.COORDENADAS.representante.y * scale) - (this.COORDENADAS.representante.alto * scale),
-            width: this.COORDENADAS.representante.ancho * scale,
-            height: this.COORDENADAS.representante.alto * scale,
-        });
-
-        return await pdfDoc.save();
     }
 
     async markAsPrinted(signatureId) {
