@@ -3241,6 +3241,7 @@ class SimpleAdminPDF {
     }
 
     async downloadSingleConstancia(normalizedName, fullName) {
+        let processing;
         try {
             console.log(`📥 Descargando constancia individual para: ${fullName}`);
             
@@ -3268,11 +3269,17 @@ class SimpleAdminPDF {
                 return;
             }
             
+            console.log('✅ Firma encontrada:', signature.fullName);
+            console.log('✅ Datos de firma disponibles:', !!signature.signature);
+            console.log('✅ Firma del representante disponible:', !!this.representantSignature);
+            
             // Obtener el archivo de la constancia
             const file = this.constanciasMap.get(normalizedName);
+            console.log('📄 Archivo de constancia:', file.name, file.type);
             
             // Mostrar indicador de procesamiento
-            const processing = document.createElement('div');
+            processing = document.createElement('div');
+            processing.id = 'processingModal';
             processing.innerHTML = `
                 <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center;">
                     <div style="background: white; padding: 30px; border-radius: 12px; text-align: center; max-width: 400px;">
@@ -3284,33 +3291,35 @@ class SimpleAdminPDF {
             `;
             document.body.appendChild(processing);
             
+            // Esperar un momento para que se muestre el modal
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
             // Procesar el archivo
+            console.log('📦 Leyendo archivo...');
             const arrayBuffer = await file.arrayBuffer();
             const header = new Uint8Array(arrayBuffer.slice(0, 5));
             const headerStr = String.fromCharCode(...header);
             
             let pdfDoc;
+            const { PDFDocument } = window.PDFLib;
+            
+            if (!PDFDocument) {
+                throw new Error('PDFLib no está disponible. Verifica que la librería esté cargada correctamente.');
+            }
             
             // Si es imagen, convertir a PDF
             if (!headerStr.startsWith('%PDF')) {
                 console.log('📄 Convirtiendo imagen a PDF...');
-                const blob = new Blob([arrayBuffer]);
-                const imageUrl = URL.createObjectURL(blob);
-                const img = new Image();
-                
-                await new Promise((resolve, reject) => {
-                    img.onload = resolve;
-                    img.onerror = reject;
-                    img.src = imageUrl;
-                });
                 
                 // Crear PDF con la imagen
-                pdfDoc = await PDFLib.PDFDocument.create();
+                pdfDoc = await PDFDocument.create();
                 
                 let imageEmbed;
                 if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
+                    console.log('🖼️ Incrustando PNG...');
                     imageEmbed = await pdfDoc.embedPng(arrayBuffer);
                 } else {
+                    console.log('🖼️ Incrustando JPG...');
                     imageEmbed = await pdfDoc.embedJpg(arrayBuffer);
                 }
                 
@@ -3321,12 +3330,10 @@ class SimpleAdminPDF {
                     width: imageEmbed.width,
                     height: imageEmbed.height
                 });
-                
-                URL.revokeObjectURL(imageUrl);
             } else {
                 // Es PDF
-                console.log('📄 Cargando PDF...');
-                pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+                console.log('📄 Cargando PDF existente...');
+                pdfDoc = await PDFDocument.load(arrayBuffer);
             }
             
             // Agregar las firmas
@@ -3334,57 +3341,136 @@ class SimpleAdminPDF {
             const pages = pdfDoc.getPages();
             const firstPage = pages[0];
             
+            const pageWidth = firstPage.getWidth();
+            const pageHeight = firstPage.getHeight();
+            console.log('📐 Dimensiones de la página:', pageWidth, 'x', pageHeight);
+            
             // Incrustar firma del usuario
-            const userSignatureImageBytes = await fetch(signature.signatureData).then(res => res.arrayBuffer());
+            console.log('👤 Incrustando firma del usuario...');
+            const userSignatureImageBytes = await fetch(signature.signature).then(res => res.arrayBuffer());
             const userSignatureImage = await pdfDoc.embedPng(userSignatureImageBytes);
             
             // Incrustar firma del representante
+            console.log('🏛️ Incrustando firma del representante...');
             const repSignatureImageBytes = await fetch(this.representantSignature).then(res => res.arrayBuffer());
             const repSignatureImage = await pdfDoc.embedPng(repSignatureImageBytes);
             
-            // Usar coordenadas unificadas
-            const userCoords = this.COORDENADAS.usuario;
-            const repCoords = this.COORDENADAS.representante;
+            // ✅ COORDENADAS PROPORCIONALES AL TAMAÑO DE LA IMAGEN (igual que signPdfForQueue)
+            const BASE_WIDTH = 1000; // Ancho de referencia para las coordenadas originales
+            const scale = pageWidth / BASE_WIDTH;
+            
+            console.log('📐 Escala calculada:', scale.toFixed(2), 'x (página', pageWidth, 'px, base', BASE_WIDTH, 'px)');
+            
+            // Calcular posiciones proporcionales (igual que en signPdfForQueue)
+            const userPos = {
+                x: this.COORDENADAS.usuario.x * scale,
+                y: pageHeight - (this.COORDENADAS.usuario.y * scale) - (this.COORDENADAS.usuario.alto * scale),
+                width: this.COORDENADAS.usuario.ancho * scale,
+                height: this.COORDENADAS.usuario.alto * scale,
+            };
+            
+            const repPos = {
+                x: this.COORDENADAS.representante.x * scale,
+                y: pageHeight - (this.COORDENADAS.representante.y * scale) - (this.COORDENADAS.representante.alto * scale),
+                width: this.COORDENADAS.representante.ancho * scale,
+                height: this.COORDENADAS.representante.alto * scale,
+            };
+            
+            console.log('📍 Coordenadas usuario (escaladas):', userPos);
+            console.log('📍 Coordenadas representante (escaladas):', repPos);
             
             // Dibujar firma del usuario
-            firstPage.drawImage(userSignatureImage, {
-                x: userCoords.x,
-                y: userCoords.y,
-                width: userCoords.ancho,
-                height: userCoords.alto
-            });
+            firstPage.drawImage(userSignatureImage, userPos);
             
             // Dibujar firma del representante
-            firstPage.drawImage(repSignatureImage, {
-                x: repCoords.x,
-                y: repCoords.y,
-                width: repCoords.ancho,
-                height: repCoords.alto
-            });
+            firstPage.drawImage(repSignatureImage, repPos);
+            
+            console.log('✅ Firmas agregadas correctamente');
             
             // Guardar PDF firmado
+            console.log('💾 Guardando PDF...');
             const pdfBytes = await pdfDoc.save();
+            console.log('✅ PDF guardado, tamaño:', pdfBytes.length, 'bytes');
             
             // Remover indicador de procesamiento
-            document.body.removeChild(processing);
+            if (processing && processing.parentNode) {
+                document.body.removeChild(processing);
+            }
             
             // Descargar PDF
             console.log('💾 Descargando PDF firmado...');
             this.downloadPdf(pdfBytes, fullName);
             
-            console.log(`✅ Constancia descargada: ${fullName}`);
-            alert(`✅ Constancia firmada y descargada correctamente para:\n${fullName}`);
+            // Marcar como impresa para este curso
+            console.log('🖨️ Marcando como impresa...');
+            const courseDate = this.attendanceDate || new Date().toISOString().split('T')[0];
             
-        } catch (error) {
-            console.error('❌ Error al descargar constancia individual:', error);
-            
-            // Remover indicador si existe
-            const processing = document.querySelector('div[style*="position: fixed"]');
-            if (processing) {
-                processing.remove();
+            // Actualizar en Firestore
+            if (CONFIG.USE_FIREBASE && db) {
+                try {
+                    const docRef = db.collection('signatures').doc(signature.id);
+                    const doc = await docRef.get();
+                    let printedCourses = doc.exists && doc.data().printedCourses ? doc.data().printedCourses : [];
+                    
+                    if (!printedCourses.includes(courseDate)) {
+                        printedCourses.push(courseDate);
+                    }
+                    
+                    await docRef.update({
+                        printedCourses: printedCourses,
+                        lastPrintedDate: new Date().toISOString(),
+                        printed: true,
+                        printedDate: new Date().toISOString()
+                    });
+                    console.log('✅ Estado actualizado en Firestore');
+                } catch (firestoreError) {
+                    console.warn('⚠️ Error actualizando Firestore:', firestoreError);
+                }
             }
             
-            alert(`❌ Error al procesar la constancia:\n${error.message}\n\nIntenta de nuevo o revisa la consola para más detalles.`);
+            // Actualizar en localStorage
+            let signatures = JSON.parse(localStorage.getItem('signatures') || '[]');
+            const sigIndex = signatures.findIndex(sig => sig.id === signature.id);
+            
+            if (sigIndex !== -1) {
+                if (!signatures[sigIndex].printedCourses) {
+                    signatures[sigIndex].printedCourses = [];
+                }
+                
+                if (!signatures[sigIndex].printedCourses.includes(courseDate)) {
+                    signatures[sigIndex].printedCourses.push(courseDate);
+                }
+                
+                signatures[sigIndex].lastPrintedDate = new Date().toISOString();
+                signatures[sigIndex].printed = true;
+                signatures[sigIndex].printedDate = new Date().toISOString();
+                
+                localStorage.setItem('signatures', JSON.stringify(signatures));
+                console.log('✅ Estado actualizado en localStorage');
+            }
+            
+            // Recargar tabla para mostrar el cambio (sin scroll)
+            if (document.getElementById('attendanceCheckSection').style.display !== 'none') {
+                await this.showAttendanceCheck(this.currentFilterOnlyMissing || false, false);
+            }
+            
+            // Actualizar estadísticas
+            await this.updateAttendanceInfo();
+            
+            console.log(`✅ Constancia descargada y marcada como impresa: ${fullName}`);
+            alert(`✅ Constancia firmada y descargada correctamente para:\n${fullName}\n\n✓ Marcada como impresa para el curso del ${courseDate}`);
+            
+        } catch (error) {
+            console.error('❌ Error completo:', error);
+            console.error('❌ Stack:', error.stack);
+            
+            // Remover indicador si existe
+            if (processing && processing.parentNode) {
+                document.body.removeChild(processing);
+            }
+            
+            const errorMsg = error.message || 'Error desconocido';
+            alert(`❌ Error al procesar la constancia:\n${errorMsg}\n\nRevisa la consola del navegador (F12) para más detalles.`);
         }
     }
 
