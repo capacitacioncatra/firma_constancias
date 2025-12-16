@@ -2944,7 +2944,7 @@ class SimpleAdminPDF {
         return date.toLocaleDateString('es-MX', options);
     }
 
-    async showAttendanceCheck(onlyMissing = false) {
+    async showAttendanceCheck(onlyMissing = false, scrollToTop = true) {
         if (!this.attendanceList || this.attendanceList.length === 0) {
             document.getElementById('noAttendanceMessage').style.display = 'block';
             document.getElementById('attendanceTable').style.display = 'none';
@@ -2952,6 +2952,9 @@ class SimpleAdminPDF {
             document.getElementById('attendanceCheckSection').style.display = 'block';
             return;
         }
+
+        // Guardar posición actual del scroll antes de recargar
+        const scrollPosition = scrollToTop ? null : window.pageYOffset || document.documentElement.scrollTop;
 
         // Guardar estado del filtro de faltantes
         this.currentFilterOnlyMissing = onlyMissing;
@@ -3103,8 +3106,15 @@ class SimpleAdminPDF {
         document.getElementById('attendanceTable').style.display = 'table';
         document.getElementById('attendanceCheckSection').style.display = 'block';
         
-        // Scroll a la tabla
-        document.getElementById('attendanceCheckSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // Scroll a la tabla solo si se especifica, de lo contrario mantener posición
+        if (scrollToTop) {
+            document.getElementById('attendanceCheckSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else if (scrollPosition !== null) {
+            // Restaurar posición anterior
+            setTimeout(() => {
+                window.scrollTo({ top: scrollPosition, behavior: 'auto' });
+            }, 0);
+        }
     }
 
     async togglePrintedStatus(signatureId, newStatus) {
@@ -3170,8 +3180,8 @@ class SimpleAdminPDF {
                 console.log('✅ Estado actualizado en localStorage');
             }
             
-            // Recargar tabla de cotejo
-            await this.showAttendanceCheck();
+            // Recargar tabla de cotejo SIN hacer scroll (mantener posición)
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false, false);
             
         } catch (error) {
             console.error('❌ Error al cambiar estado de impresión:', error);
@@ -3198,8 +3208,8 @@ class SimpleAdminPDF {
             
             console.log(`✅ Constancia asignada manualmente: ${file.name} → ${fullName}`);
             
-            // Actualizar la tabla
-            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+            // Actualizar la tabla (sin scroll)
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false, false);
             
             // Actualizar estadísticas
             await this.updateAttendanceInfo();
@@ -3223,8 +3233,8 @@ class SimpleAdminPDF {
         
         console.log(`✅ Constancia eliminada de: ${fullName}`);
         
-        // Actualizar la tabla
-        this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+        // Actualizar la tabla (sin scroll)
+        this.showAttendanceCheck(this.currentFilterOnlyMissing || false, false);
         
         // Actualizar estadísticas
         this.updateAttendanceInfo();
@@ -3480,9 +3490,9 @@ class SimpleAdminPDF {
         
         alert(message);
         
-        // Recargar la tabla si está visible
+        // Recargar la tabla si está visible (sin scroll)
         if (document.getElementById('attendanceCheckSection').style.display !== 'none') {
-            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false, false);
         }
     }
 
@@ -3878,8 +3888,8 @@ class SimpleAdminPDF {
             
             alert(successMsg);
 
-            // Recargar tabla
-            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+            // Recargar tabla (sin scroll)
+            await this.showAttendanceCheck(this.currentFilterOnlyMissing || false, false);
 
         } catch (error) {
             console.error('❌ Error:', error);
