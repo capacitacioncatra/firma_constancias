@@ -147,11 +147,22 @@ class SimpleAdminPDF {
         const datePicker = document.getElementById('attendanceDatePicker');
         datePicker.value = new Date().toISOString().split('T')[0]; // Establecer hoy por defecto
         
-        datePicker.addEventListener('change', () => {
-            // Si ya hay una lista cargada, recargarla con la nueva fecha
-            if (this.attendanceList && this.attendanceList.length > 0) {
-                this.selectedAttendanceDate = datePicker.value;
-                this.updateAttendanceInfo();
+        datePicker.addEventListener('change', async () => {
+            const newDate = datePicker.value;
+            console.log(`📅 Fecha cambiada a: ${newDate}`);
+            
+            // Si hay un workbook cargado, recargar automáticamente con la nueva fecha
+            if (this.savedWorkbook) {
+                console.log('📚 Recargando lista con nueva fecha desde Excel guardado...');
+                this.selectedAttendanceDate = newDate;
+                await this.reloadAttendanceFromWorkbook();
+            } else if (this.attendanceList && this.attendanceList.length > 0) {
+                // Si solo hay lista pero no workbook, actualizar fecha y estadísticas
+                this.selectedAttendanceDate = newDate;
+                this.attendanceDate = newDate;
+                document.getElementById('loadedAttendanceDate').textContent = this.formatDisplayDate(newDate);
+                await this.updateAttendanceInfo();
+                console.log('📅 Fecha actualizada, pero sin Excel guardado para recargar datos');
             }
         });
 
@@ -725,10 +736,13 @@ class SimpleAdminPDF {
             throw new Error(`Firma no encontrada: ${name || doc || 'sin datos detectados'}`);
         }
 
-        // Verificar si ya está marcada como impresa
-        if (found.printed === true) {
-            console.log(`⏭️ Saltando ${item.name} - constancia ya impresa`);
-            throw new Error(`Ya impresa - saltando: ${found.fullName}`);
+        // Verificar si ya está marcada como impresa para ESTE curso
+        const courseDate = this.attendanceDate || new Date().toISOString().split('T')[0];
+        const printedCourses = found.printedCourses || [];
+        
+        if (printedCourses.includes(courseDate)) {
+            console.log(`⏭️ Saltando ${item.name} - constancia ya impresa para curso del ${courseDate}`);
+            throw new Error(`Ya impresa para curso ${courseDate} - saltando: ${found.fullName}`);
         }
 
         console.log(`✅ Firma encontrada para ${item.name}:`, found.fullName);
@@ -2495,6 +2509,9 @@ class SimpleAdminPDF {
                     this.attendanceSheetName = selectedSheetName;
                     this.attendanceDate = attendanceDate;
                     
+                    // Guardar workbook completo para poder cambiar fechas sin recargar
+                    this.savedWorkbook = workbook;
+                    
                     // Guardar en Firestore
                     if (CONFIG.USE_FIREBASE && db) {
                         try {
@@ -2511,13 +2528,17 @@ class SimpleAdminPDF {
                         }
                     }
                     
-                    // Guardar en localStorage como backup
+                    // Guardar en localStorage como backup (sin el workbook completo)
                     localStorage.setItem('attendanceList', JSON.stringify(attendanceList));
                     localStorage.setItem('attendanceListDate', attendanceDate);
                     localStorage.setItem('attendanceSheetName', selectedSheetName);
+                    localStorage.setItem('attendanceWorkbookSheets', JSON.stringify(workbook.SheetNames));
                     
                     // Ocultar selector si estaba visible
                     document.getElementById('sheetSelector').style.display = 'none';
+                    
+                    // Mostrar indicador de que puede cambiar fecha
+                    document.getElementById('dateChangeIndicator').style.display = 'block';
                     
                     // Actualizar UI
                     document.getElementById('loadedSheetName').textContent = selectedSheetName;
@@ -2537,6 +2558,131 @@ class SimpleAdminPDF {
         } catch (error) {
             console.error('❌ Error cargando archivo:', error);
             alert('❌ Error al cargar el archivo. Intenta de nuevo.');
+        }
+    }
+
+    async reloadAttendanceFromWorkbook() {
+        if (!this.savedWorkbook) {
+            console.warn('⚠️ No hay workbook guardado para recargar');
+            return;
+        }
+
+        try {
+            const targetDate = this.selectedAttendanceDate || new Date().toISOString().split('T')[0];
+            console.log(`🔄 Recargando lista para fecha: ${targetDate}`);
+
+            // Intentar detectar la hoja para la nueva fecha
+            let selectedSheetName = this.detectDateSheet(this.savedWorkbook.SheetNames, targetDate);
+            
+            // Si no se detectó, usar la última hoja cargada
+            if (!selectedSheetName) {
+                selectedSheetName = this.attendanceSheetName;
+                console.log(`📋 No se detectó hoja automáticamente, usando última hoja: ${selectedSheetName}`);
+            } else {
+                console.log(`✅ Hoja detectada automáticamente: ${selectedSheetName}`);
+            }
+
+            // Leer la hoja seleccionada
+            const sheet = this.savedWorkbook.Sheets[selectedSheetName];
+            const jsonData = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+            // Extraer nombres (mismo proceso que en loadAttendanceList)
+            const attendanceList = [];
+            let startRow = 0;
+
+            // Buscar la fila donde empiezan los datos
+            for (let i = 0; i < Math.min(10, jsonData.length); i++) {
+                const row = jsonData[i];
+                if (row && row[1]) {
+                    const cellValue = String(row[1]).trim().toLowerCase();
+                    if (cellValue === 'nombre' || cellValue === 'nombres' || cellValue === 'nombre completo') {
+                        startRow = i + 1;
+                        break;
+                    }
+                }
+            }
+
+            if (startRow === 0 && jsonData.length > 0 && jsonData[0] && jsonData[0][1]) {
+                const firstCell = String(jsonData[0][1]).trim();
+                if (firstCell.length > 5 && firstCell.includes(' ')) {
+                    startRow = 0;
+                } else {
+                    startRow = 1;
+                }
+            }
+
+            // Extraer nombres
+            for (let i = startRow; i < jsonData.length; i++) {
+                const row = jsonData[i];
+                if (row && row[1]) {
+                    const name = String(row[1]).trim();
+                    const gestor = row[12] ? String(row[12]).trim().toUpperCase() : 'SIN GESTOR';
+
+                    if (name && 
+                        name.length > 2 && 
+                        name.toLowerCase() !== 'nombre' && 
+                        name.toLowerCase() !== 'nombres' &&
+                        name.toLowerCase() !== 'nombre completo' &&
+                        !name.match(/^[0-9]+$/)) {
+                        
+                        attendanceList.push({
+                            name: name.toUpperCase(),
+                            normalized: this.normalizeNameForMatch(name),
+                            gestor: gestor
+                        });
+                    }
+                }
+            }
+
+            console.log(`✅ ${attendanceList.length} nombres recargados para ${targetDate}`);
+
+            // Actualizar en memoria
+            this.attendanceList = attendanceList;
+            this.attendanceSheetName = selectedSheetName;
+            this.attendanceDate = targetDate;
+
+            // Actualizar localStorage
+            localStorage.setItem('attendanceList', JSON.stringify(attendanceList));
+            localStorage.setItem('attendanceListDate', targetDate);
+            localStorage.setItem('attendanceSheetName', selectedSheetName);
+
+            // Limpiar constancias cargadas (son para otra fecha)
+            this.constanciasMap.clear();
+
+            // Actualizar UI
+            document.getElementById('loadedSheetName').textContent = selectedSheetName;
+            document.getElementById('loadedAttendanceDate').textContent = this.formatDisplayDate(targetDate);
+            await this.updateAttendanceInfo();
+
+            // Si la tabla de cotejo está visible, recargarla
+            if (document.getElementById('attendanceCheckSection').style.display !== 'none') {
+                await this.showAttendanceCheck(this.currentFilterOnlyMissing || false);
+            }
+
+            // Mostrar notificación
+            const notification = document.createElement('div');
+            notification.innerHTML = `
+                <div style="position: fixed; top: 20px; right: 20px; background: #10b981; color: white; padding: 15px 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 10000; animation: slideIn 0.3s;">
+                    <div style="font-weight: 600; margin-bottom: 5px;">✅ Lista actualizada</div>
+                    <div style="font-size: 0.9rem;">Fecha: ${this.formatDisplayDate(targetDate)}</div>
+                    <div style="font-size: 0.9rem;">Hoja: ${selectedSheetName}</div>
+                    <div style="font-size: 0.9rem;">Personas: ${attendanceList.length}</div>
+                </div>
+                <style>
+                    @keyframes slideIn {
+                        from { transform: translateX(400px); opacity: 0; }
+                        to { transform: translateX(0); opacity: 1; }
+                    }
+                </style>
+            `;
+            document.body.appendChild(notification);
+            setTimeout(() => notification.remove(), 4000);
+
+            console.log('✅ Lista recargada exitosamente');
+
+        } catch (error) {
+            console.error('❌ Error recargando lista:', error);
+            alert(`❌ Error al recargar la lista para la nueva fecha.\n\nPuedes cargar el Excel nuevamente si es necesario.`);
         }
     }
 
@@ -2718,7 +2864,10 @@ class SimpleAdminPDF {
             
             if (signature) {
                 presentCount++;
-                if (signature.printed === true) {
+                // Verificar si está impresa para ESTE curso
+                const courseDate = this.attendanceDate || new Date().toISOString().split('T')[0];
+                const printedCourses = signature.printedCourses || [];
+                if (printedCourses.includes(courseDate)) {
                     printedCount++;
                 }
             }
@@ -2875,8 +3024,10 @@ class SimpleAdminPDF {
             // Crear ID único para esta fila
             const rowId = `row_${rowNumber}_${expected.normalized.replace(/\s+/g, '_')}`;
             
-            // Verificar si está marcada como impresa
-            const isPrinted = hasSignature && signature.printed === true;
+            // Verificar si está marcada como impresa para ESTE curso
+            const courseDate = this.attendanceDate || new Date().toISOString().split('T')[0];
+            const printedCourses = hasSignature && signature.printedCourses ? signature.printedCourses : [];
+            const isPrinted = printedCourses.includes(courseDate);
             const printedIcon = isPrinted ? '✓' : (hasSignature ? '○' : '-');
             const printedText = isPrinted ? '' : (hasSignature ? '' : '-');
             const printedColor = isPrinted ? '#10b981' : '#f59e0b';
@@ -2893,7 +3044,7 @@ class SimpleAdminPDF {
                         ${!hasConstancia ? `
                             <button 
                                 onclick="adminPDF.uploadManualConstancia('${expected.normalized}', '${expected.name.replace(/'/g, "\\'")}')"
-                                style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; white-space: nowrap; transition: background 0.2s;"
+                                style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; white-space: nowrap; transition: background 0.2s; pointer-events: auto;"
                                 onmouseover="this.style.background='#2563eb'"
                                 onmouseout="this.style.background='#3b82f6'"
                                 title="Subir constancia manualmente"
@@ -2902,8 +3053,17 @@ class SimpleAdminPDF {
                             </button>
                         ` : `
                             <button 
+                                onclick="adminPDF.downloadSingleConstancia('${expected.normalized}', '${expected.name.replace(/'/g, "\\'")}')"
+                                style="padding: 6px 12px; background: #10b981; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; white-space: nowrap; transition: background 0.2s; pointer-events: auto;"
+                                onmouseover="this.style.background='#059669'"
+                                onmouseout="this.style.background='#10b981'"
+                                title="Descargar constancia firmada"
+                            >
+                                📥
+                            </button>
+                            <button 
                                 onclick="adminPDF.removeConstancia('${expected.normalized}', '${expected.name.replace(/'/g, "\\'")}')"
-                                style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; white-space: nowrap; transition: background 0.2s;"
+                                style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1rem; white-space: nowrap; transition: background 0.2s; pointer-events: auto;"
                                 onmouseover="this.style.background='#dc2626'"
                                 onmouseout="this.style.background='#ef4444'"
                                 title="Quitar constancia"
@@ -2949,13 +3109,31 @@ class SimpleAdminPDF {
 
     async togglePrintedStatus(signatureId, newStatus) {
         try {
-            console.log(`🖨️ Cambiando estado de impresión: ${signatureId} → ${newStatus}`);
+            const courseDate = this.attendanceDate || new Date().toISOString().split('T')[0];
+            console.log(`🖨️ Cambiando estado de impresión: ${signatureId} → ${newStatus} para curso ${courseDate}`);
             
             // Actualizar en Firestore
             if (CONFIG.USE_FIREBASE && db) {
                 try {
-                    await db.collection('signatures').doc(signatureId).update({
-                        printed: newStatus,
+                    const docRef = db.collection('signatures').doc(signatureId);
+                    const doc = await docRef.get();
+                    let printedCourses = doc.exists && doc.data().printedCourses ? doc.data().printedCourses : [];
+                    
+                    if (newStatus) {
+                        // Agregar fecha si no existe
+                        if (!printedCourses.includes(courseDate)) {
+                            printedCourses.push(courseDate);
+                        }
+                    } else {
+                        // Remover fecha del array
+                        printedCourses = printedCourses.filter(date => date !== courseDate);
+                    }
+                    
+                    await docRef.update({
+                        printedCourses: printedCourses,
+                        lastPrintedDate: newStatus ? new Date().toISOString() : null,
+                        // Mantener compatibilidad
+                        printed: printedCourses.length > 0,
                         printedDate: newStatus ? new Date().toISOString() : null
                     });
                     console.log('✅ Estado actualizado en Firestore');
@@ -2969,8 +3147,25 @@ class SimpleAdminPDF {
             const sigIndex = signatures.findIndex(sig => sig.id === signatureId);
             
             if (sigIndex !== -1) {
-                signatures[sigIndex].printed = newStatus;
+                if (!signatures[sigIndex].printedCourses) {
+                    signatures[sigIndex].printedCourses = [];
+                }
+                
+                if (newStatus) {
+                    // Agregar fecha si no existe
+                    if (!signatures[sigIndex].printedCourses.includes(courseDate)) {
+                        signatures[sigIndex].printedCourses.push(courseDate);
+                    }
+                } else {
+                    // Remover fecha del array
+                    signatures[sigIndex].printedCourses = signatures[sigIndex].printedCourses.filter(date => date !== courseDate);
+                }
+                
+                signatures[sigIndex].lastPrintedDate = newStatus ? new Date().toISOString() : null;
+                // Mantener compatibilidad
+                signatures[sigIndex].printed = signatures[sigIndex].printedCourses.length > 0;
                 signatures[sigIndex].printedDate = newStatus ? new Date().toISOString() : null;
+                
                 localStorage.setItem('signatures', JSON.stringify(signatures));
                 console.log('✅ Estado actualizado en localStorage');
             }
@@ -3033,6 +3228,154 @@ class SimpleAdminPDF {
         
         // Actualizar estadísticas
         this.updateAttendanceInfo();
+    }
+
+    async downloadSingleConstancia(normalizedName, fullName) {
+        try {
+            console.log(`📥 Descargando constancia individual para: ${fullName}`);
+            
+            // Verificar que existe la constancia
+            if (!this.constanciasMap.has(normalizedName)) {
+                alert('⚠️ No se encontró la constancia cargada.');
+                return;
+            }
+            
+            // Verificar que existe la firma del representante
+            if (!this.representantSignature) {
+                alert('⚠️ Primero debes configurar la firma del representante legal.');
+                return;
+            }
+            
+            // Buscar la firma del alumno
+            const allSignatures = await this.getAllSignatures();
+            const signature = allSignatures.find(sig => {
+                const sigNormalized = this.normalizeNameForMatch(sig.fullName);
+                return sigNormalized === normalizedName;
+            });
+            
+            if (!signature) {
+                alert(`⚠️ No se encontró la firma registrada para:\n${fullName}\n\nLa persona debe firmar primero en la página de captura.`);
+                return;
+            }
+            
+            // Obtener el archivo de la constancia
+            const file = this.constanciasMap.get(normalizedName);
+            
+            // Mostrar indicador de procesamiento
+            const processing = document.createElement('div');
+            processing.innerHTML = `
+                <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center;">
+                    <div style="background: white; padding: 30px; border-radius: 12px; text-align: center; max-width: 400px;">
+                        <div style="font-size: 3rem; margin-bottom: 15px;">⏳</div>
+                        <div style="font-size: 1.2rem; font-weight: 600; color: #1f2937; margin-bottom: 10px;">Procesando constancia...</div>
+                        <div style="font-size: 0.9rem; color: #64748b;">Firmando el documento, por favor espera</div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(processing);
+            
+            // Procesar el archivo
+            const arrayBuffer = await file.arrayBuffer();
+            const header = new Uint8Array(arrayBuffer.slice(0, 5));
+            const headerStr = String.fromCharCode(...header);
+            
+            let pdfDoc;
+            
+            // Si es imagen, convertir a PDF
+            if (!headerStr.startsWith('%PDF')) {
+                console.log('📄 Convirtiendo imagen a PDF...');
+                const blob = new Blob([arrayBuffer]);
+                const imageUrl = URL.createObjectURL(blob);
+                const img = new Image();
+                
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                    img.src = imageUrl;
+                });
+                
+                // Crear PDF con la imagen
+                pdfDoc = await PDFLib.PDFDocument.create();
+                
+                let imageEmbed;
+                if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
+                    imageEmbed = await pdfDoc.embedPng(arrayBuffer);
+                } else {
+                    imageEmbed = await pdfDoc.embedJpg(arrayBuffer);
+                }
+                
+                const page = pdfDoc.addPage([imageEmbed.width, imageEmbed.height]);
+                page.drawImage(imageEmbed, {
+                    x: 0,
+                    y: 0,
+                    width: imageEmbed.width,
+                    height: imageEmbed.height
+                });
+                
+                URL.revokeObjectURL(imageUrl);
+            } else {
+                // Es PDF
+                console.log('📄 Cargando PDF...');
+                pdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+            }
+            
+            // Agregar las firmas
+            console.log('✍️ Agregando firmas al PDF...');
+            const pages = pdfDoc.getPages();
+            const firstPage = pages[0];
+            
+            // Incrustar firma del usuario
+            const userSignatureImageBytes = await fetch(signature.signatureData).then(res => res.arrayBuffer());
+            const userSignatureImage = await pdfDoc.embedPng(userSignatureImageBytes);
+            
+            // Incrustar firma del representante
+            const repSignatureImageBytes = await fetch(this.representantSignature).then(res => res.arrayBuffer());
+            const repSignatureImage = await pdfDoc.embedPng(repSignatureImageBytes);
+            
+            // Usar coordenadas unificadas
+            const userCoords = this.COORDENADAS.usuario;
+            const repCoords = this.COORDENADAS.representante;
+            
+            // Dibujar firma del usuario
+            firstPage.drawImage(userSignatureImage, {
+                x: userCoords.x,
+                y: userCoords.y,
+                width: userCoords.ancho,
+                height: userCoords.alto
+            });
+            
+            // Dibujar firma del representante
+            firstPage.drawImage(repSignatureImage, {
+                x: repCoords.x,
+                y: repCoords.y,
+                width: repCoords.ancho,
+                height: repCoords.alto
+            });
+            
+            // Guardar PDF firmado
+            const pdfBytes = await pdfDoc.save();
+            
+            // Remover indicador de procesamiento
+            document.body.removeChild(processing);
+            
+            // Descargar PDF
+            console.log('💾 Descargando PDF firmado...');
+            this.downloadPdf(pdfBytes, fullName);
+            
+            console.log(`✅ Constancia descargada: ${fullName}`);
+            alert(`✅ Constancia firmada y descargada correctamente para:\n${fullName}`);
+            
+        } catch (error) {
+            console.error('❌ Error al descargar constancia individual:', error);
+            
+            // Remover indicador si existe
+            const processing = document.querySelector('div[style*="position: fixed"]');
+            if (processing) {
+                processing.remove();
+            }
+            
+            alert(`❌ Error al procesar la constancia:\n${error.message}\n\nIntenta de nuevo o revisa la consola para más detalles.`);
+        }
     }
 
     async loadConstancias(files) {
@@ -3427,6 +3770,7 @@ class SimpleAdminPDF {
         
         // Filtrar solo los que tienen constancia cargada Y tienen firma
         const alumnosToProcess = [];
+        const courseDate = this.attendanceDate || new Date().toISOString().split('T')[0];
         
         for (const alumno of filteredList) {
             const hasConstancia = this.constanciasMap.has(alumno.normalized);
@@ -3438,12 +3782,18 @@ class SimpleAdminPDF {
                     return sigNormalized === alumno.normalized;
                 });
                 
-                if (signature && !signature.printed) {
-                    alumnosToProcess.push({
-                        alumno: alumno,
-                        signature: signature,
-                        constanciaFile: this.constanciasMap.get(alumno.normalized)
-                    });
+                if (signature) {
+                    // Verificar si ya fue impresa para ESTE curso
+                    const printedCourses = signature.printedCourses || [];
+                    const isAlreadyPrinted = printedCourses.includes(courseDate);
+                    
+                    if (!isAlreadyPrinted) {
+                        alumnosToProcess.push({
+                            alumno: alumno,
+                            signature: signature,
+                            constanciaFile: this.constanciasMap.get(alumno.normalized)
+                        });
+                    }
                 }
             }
         }
@@ -3730,16 +4080,28 @@ class SimpleAdminPDF {
 
     async markAsPrinted(signatureId) {
         try {
-            console.log(`🖨️ Marcando como impresa: ${signatureId}`);
+            const courseDate = this.attendanceDate || new Date().toISOString().split('T')[0];
+            console.log(`🖨️ Marcando como impresa: ${signatureId} para curso del ${courseDate}`);
             
             // Actualizar en Firestore
             if (CONFIG.USE_FIREBASE && db) {
                 try {
-                    await db.collection('signatures').doc(signatureId).update({
+                    const docRef = db.collection('signatures').doc(signatureId);
+                    const doc = await docRef.get();
+                    const printedCourses = doc.exists && doc.data().printedCourses ? doc.data().printedCourses : [];
+                    
+                    if (!printedCourses.includes(courseDate)) {
+                        printedCourses.push(courseDate);
+                    }
+                    
+                    await docRef.update({
+                        printedCourses: printedCourses,
+                        lastPrintedDate: new Date().toISOString(),
+                        // Mantener compatibilidad con código anterior
                         printed: true,
                         printedDate: new Date().toISOString()
                     });
-                    console.log('✅ Marcada como impresa en Firestore');
+                    console.log(`✅ Curso ${courseDate} marcado como impreso en Firestore`);
                 } catch (firestoreError) {
                     console.error('❌ Error actualizando Firestore:', firestoreError);
                 }
@@ -3750,10 +4112,21 @@ class SimpleAdminPDF {
             const sigIndex = signatures.findIndex(sig => sig.id === signatureId);
             
             if (sigIndex !== -1) {
+                if (!signatures[sigIndex].printedCourses) {
+                    signatures[sigIndex].printedCourses = [];
+                }
+                
+                if (!signatures[sigIndex].printedCourses.includes(courseDate)) {
+                    signatures[sigIndex].printedCourses.push(courseDate);
+                }
+                
+                signatures[sigIndex].lastPrintedDate = new Date().toISOString();
+                // Mantener compatibilidad
                 signatures[sigIndex].printed = true;
                 signatures[sigIndex].printedDate = new Date().toISOString();
+                
                 localStorage.setItem('signatures', JSON.stringify(signatures));
-                console.log('✅ Marcada como impresa en localStorage');
+                console.log(`✅ Curso ${courseDate} marcado como impreso en localStorage`);
             }
             
         } catch (error) {

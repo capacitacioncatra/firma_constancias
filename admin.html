@@ -52,7 +52,12 @@
                     <label style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151; font-size: 0.9rem;">
                         Selecciona la fecha:
                     </label>
-                    <input type="date" id="attendanceDatePicker" style="width: 100%; max-width: 300px; padding: 10px; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.95rem;" />
+                    <div style="position: relative;">
+                        <input type="date" id="attendanceDatePicker" style="width: 100%; max-width: 300px; padding: 10px; border: 2px solid #e5e7eb; border-radius: 6px; font-size: 0.95rem;" />
+                        <div id="dateChangeIndicator" style="display: none; margin-top: 5px; padding: 5px 10px; background: #dbeafe; border: 1px solid #3b82f6; border-radius: 4px; font-size: 0.8rem; color: #1e40af; max-width: 300px;">
+                            💡 Cambia la fecha para ver otra lista del mismo Excel
+                        </div>
+                    </div>
                 </div>
                 
                 <button id="loadAttendanceBtn" class="btn btn-primary" style="width: 100%; max-width: 300px; margin-bottom: 10px;">
