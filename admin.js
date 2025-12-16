@@ -2545,7 +2545,8 @@ class SimpleAdminPDF {
                     document.getElementById('loadedAttendanceDate').textContent = this.formatDisplayDate(attendanceDate);
                     this.updateAttendanceInfo();
                     
-                    alert(`Lista cargada correctamente\n\nFecha: ${this.formatDisplayDate(attendanceDate)}\nHoja: ${selectedSheetName}\nPersonas: ${attendanceList.length}\n\n Usa "Ver Tabla de Cotejo" para cargar constancias y gestionar firmas`);
+                    // Feedback visual ya está en la UI, no necesitamos alerta
+                    console.log(`✅ Lista cargada: ${attendanceList.length} personas para ${this.formatDisplayDate(attendanceDate)}`);
                     
                 } catch (error) {
                     console.error('❌ Error procesando Excel:', error);
@@ -3214,7 +3215,8 @@ class SimpleAdminPDF {
             // Actualizar estadísticas
             await this.updateAttendanceInfo();
             
-            alert(`✅ Constancia asignada correctamente a:\n${fullName}`);
+            // La tabla ya muestra el cambio, no necesitamos alerta
+            console.log(`✅ Constancia asignada a: ${fullName}`);
         };
         
         // Trigger click
@@ -3458,7 +3460,7 @@ class SimpleAdminPDF {
             await this.updateAttendanceInfo();
             
             console.log(`✅ Constancia descargada y marcada como impresa: ${fullName}`);
-            alert(`✅ Constancia firmada y descargada correctamente para:\n${fullName}\n\n✓ Marcada como impresa para el curso del ${courseDate}`);
+            // La descarga y actualización visual son suficientes
             
         } catch (error) {
             console.error('❌ Error completo:', error);
@@ -3562,19 +3564,19 @@ class SimpleAdminPDF {
         // Actualizar estadísticas
         await this.updateAttendanceInfo();
 
-        let message = `✅ Se cargaron ${processedCount} de ${files.length} constancias.\n\n`;
+        // Solo mostrar alerta si hay archivos no asociados
         if (notFoundFiles.length > 0) {
-            message += `⚠️ No se pudieron asociar ${notFoundFiles.length} archivos:\n`;
+            let message = `Se cargaron ${processedCount} de ${files.length} constancias.\n\n⚠️ No se pudieron asociar ${notFoundFiles.length} archivos:\n`;
             notFoundFiles.slice(0, 5).forEach(name => {
                 message += `• ${name}\n`;
             });
             if (notFoundFiles.length > 5) {
-                message += `... y ${notFoundFiles.length - 5} más\n`;
+                message += `... y ${notFoundFiles.length - 5} más`;
             }
+            alert(message);
+        } else {
+            console.log(`✅ ${processedCount} constancias cargadas correctamente`);
         }
-        message += '\nAhora puedes ver en la tabla qué alumnos tienen su constancia cargada.';
-        
-        alert(message);
         
         // Recargar la tabla si está visible (sin scroll)
         if (document.getElementById('attendanceCheckSection').style.display !== 'none') {
@@ -3963,16 +3965,16 @@ class SimpleAdminPDF {
             // Actualizar estadísticas
             await this.updateAttendanceInfo();
 
-            let successMsg = `✅ Proceso completado!\n\n✓ ${signedPdfs.length} constancias firmadas correctamente\n✓ ${processedSignatureIds.length} marcadas como impresas\n✓ PDF descargado: ${fileName}`;
-            
+            // Solo mostrar alerta si hay problemas
             if (failedItems.length > 0) {
-                successMsg += `\n\n⚠️ ${failedItems.length} constancias con problemas:\n\n`;
+                let errorMsg = `Proceso completado con ${failedItems.length} advertencias:\n\n`;
                 failedItems.forEach(item => {
-                    successMsg += `• ${item.nombre} (${item.fecha})\n`;
+                    errorMsg += `• ${item.nombre} (${item.fecha})\n`;
                 });
+                alert(errorMsg);
+            } else {
+                console.log(`✅ ${signedPdfs.length} constancias procesadas correctamente`);
             }
-            
-            alert(successMsg);
 
             // Recargar tabla (sin scroll)
             await this.showAttendanceCheck(this.currentFilterOnlyMissing || false, false);
